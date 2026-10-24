@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cra7ty fixture — protocol stand-in for the storefront</title>
+<style>
+  body { margin: 0; font-family: Georgia, serif; background: #f4efe6; color: #1d1a16; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  #fixture-status { font: 11px ui-monospace, monospace; color: #7a6f5d; border: 1px dashed #c9bfae; padding: 6px; }
+  section { border: 1px solid #c9bfae; margin: 12px 0; padding: 16px; }
+  section[data-hidden="true"] { display: none; }
+  .sec-label { font: 12px ui-monospace, monospace; color: #7a6f5d; cursor: pointer; margin: 0 0 8px; }
+  .field { cursor: text; border-bottom: 1px dotted #b0a08a; }
+  .field:hover { background: #ffe9a8; }
+  .hl { outline: 3px solid #e5391f; }
+  #hero.split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  #hero.stacked { display: block; }
+  #featured.grid .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  #featured.staggered .cards { display: flex; flex-direction: column; }
+  .card { border: 1px solid #d8cebd; padding: 8px; background: #fbf8f2; }
+  .faq-row { padding: 4px 0; }
+  .word { display: inline-block; margin-right: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <p id="fixture-status">fixture: waiting for the admin…</p>
+  <div id="root"></div>
+</main>
+<script>
+(function () {
+  var PAGE = 'home';
+  var adminOrigin = null;
+  try {
+    if (document.referrer) adminOrigin = new URL(document.referrer).origin;
+    // cross-origin referrer policy may strip the path; ancestorOrigins is
+    // the exact embedding origin when available
+    if (!adminOrigin && location.ancestorOrigins && location.ancestorOrigins.length) {
+      adminOrigin = location.ancestorOrigins[0];
+    }
+  } catch (e) {}
+  var gotInit = false;
+  var SECTIONS = ['hero', 'marquee', 'categories', 'featured', 'process', 'bulk', 'why', 'testimonials', 'faq'];
+  var KEYS = [
+    'home.hero.eyebrow', 'home.hero.headline.0', 'home.hero.headline.1', 'home.hero.subline',
+    'home.categories.title.0', 'home.categories.title.1', 'home.categories.lede',
+    'home.featured.title.0', 'home.featured.lede', 'home.featured.count-note', 'home.featured.all-link',
+    'home.process.title.0', 'home.process.title.1', 'home.process.footnote',
+    'home.bulk.title.0', 'home.bulk.title.1', 'home.bulk.lede',
+    'home.marquee.words', 'home.faq.items', 'home.testimonials.items'
+  ];
+
+  var state = { values: {}, lists: {}, sections: null };
+  window.__msgs = [];
+
+  function post(msg) {
+    msg.source = 'cra7ty';
+    window.__msgs.push(msg);
+    if (adminOrigin) parent.postMessage(msg, adminOrigin);
+  }
+  // Test hook: post an arbitrary message FROM THE RIGHT ORIGIN — proves
+  // the admin schema-validates, not just origin-checks.
+  window.__send = function (msg) {
+    msg.source = 'cra7ty';
+    parent.postMessage(msg, adminOrigin || '*');
+  };
+  window.__gotInit = function () { return gotInit; };
+
+  // The storefront interpolates tokens; the admin never does.
+  function interp(s) {
+    return String(s).replace(/\{shown\}/g, '4').replace(/\{total\}/g, '6');
+  }
+
+  function tmpl(key) {
+    switch (key) {
+      case 'hero':
+        return '<p class="sec-label" data-sec="hero">section: hero</p>' +
+          '<p><span class="field" data-cra7ty-key="home.hero.eyebrow"></span></p>' +
+          '<h1><span class="field" data-cra7ty-key="home.hero.headline.0"></span><br />' +
+          '<span class="field" data-cra7ty-key="home.hero.headline.1"></span></h1>' +
+          '<p><span class="field" data-cra7ty-key="home.hero.subline"></span></p>';
+      case 'marquee':
+        return '<p class="sec-label" data-sec="marquee">section: marquee</p>' +
+          '<div><span class="field" data-cra7ty-key="home.marquee.words"></span></div>';
+      case 'categories':
+        return '<p class="sec-label" data-sec="categories">section: categories</p>' +
+          '<h2><span class="field" data-cra7ty-key="home.categories.title.0"></span> ' +
+          '<span class="field" data-cra7ty-key="home.categories.title.1"></span></h2>' +
+          '<p><span class="field" data-cra7ty-key="home.categories.lede"></span></p>';
+      case 'featured':
+        return '<p class="sec-label" data-sec="featured">section: featured</p>' +
+          '<h2><span class="field" data-cra7ty-key="home.featured.title.0"></span></h2>' +
+          '<p><span class="field" data-cra7ty-key="home.featured.lede"></span></p>' +
+          '<div class="cards"><div class="card">Crane string</div><div class="card">Bouquet</div><div class="card">Gift box</div></div>' +
+          '<p><span class="field" data-cra7ty-key="home.featured.count-note"></span></p>' +
+          '<p><a class="field" data-cra7ty-key="home.featured.all-link"></a></p>';
+      case 'process':
+        return '<p class="sec-label" data-sec="process">section: process</p>' +
+          '<h2><span class="field" data-cra7ty-key="home.process.title.0"></span> ' +
+          '<span class="field" data-cra7ty-key="home.process.title.1"></span></h2>' +
+          '<p><span class="field" data-cra7ty-key="home.process.footnote"></span></p>';
+      case 'bulk':
+        return '<p class="sec-label" data-sec="bulk">section: bulk</p>' +
+          '<h2><span class="field" data-cra7ty-key="home.bulk.title.0"></span> ' +
+          '<span class="field" data-cra7ty-key="home.bulk.title.1"></span></h2>' +
+          '<p><span class="field" data-cra7ty-key="home.bulk.lede"></span></p>';
+      case 'why':
+        return '<p class="sec-label" data-sec="why">section: why (shared)</p><p>Why paper band.</p>';
+      case 'testimonials':
+        return '<p class="sec-label" data-sec="testimonials">section: testimonials</p><div id="testis"></div>';
+      case 'faq':
+        return '<p class="sec-label" data-sec="faq">section: faq</p><div id="faqs"></div>';
+      default:
+        return '';
+    }
+  }
+
+  function render() {
+    var order = (state.sections && state.sections.order) || SECTIONS;
+    var hidden = (state.sections && state.sections.hidden) || [];
+    var variants = (state.sections && state.sections.variants) || {};
+    var html = '';
+    for (var i = 0; i < order.length; i++) {
+      var key = order[i];
+      var variant = variants[key] || (key === 'featured' ? 'staggered' : key === 'hero' ? 'split' : '');
+      html += '<section id="' + key + '" data-section-key="' + key + '"' +
+        ' data-hidden="' + (hidden.indexOf(key) !== -1) + '" class="' + variant + '">' +
+        tmpl(key) + '</section>';
+    }
+    document.getElementById('root').innerHTML = html; // template is static; values below are TEXT only
+
+    // field values — always textContent, never innerHTML
+    var fields = document.querySelectorAll('[data-cra7ty-key]');
+    for (var f = 0; f < fields.length; f++) {
+      var el = fields[f];
+      var k = el.getAttribute('data-cra7ty-key');
+      if (k === 'home.marquee.words') {
+        var words = (state.lists[k] || []).map(function (it) { return String(it.fields.word ?? ''); }).filter(Boolean);
+        el.textContent = words.length ? words.join(' · ') : '';
+      } else {
+        el.textContent = state.values[k] !== undefined ? interp(state.values[k]) : '';
+      }
+    }
+
+    // faq list rows with positional keys
+    var faqItems = state.lists['home.faq.items'] || [];
+    var faqHtml = '';
+    for (var q = 0; q < faqItems.length; q++) {
+      faqHtml += '<div class="faq-row"><strong class="field" data-cra7ty-key="home.faq.items.' + q + '.question"></strong>' +
+        '<p><span class="field" data-cra7ty-key="home.faq.items.' + q + '.answer"></span></p></div>';
+    }
+    var faqBox = document.getElementById('faqs');
+    if (faqBox) {
+      faqBox.innerHTML = faqHtml; // static row template only
+      var qFields = faqBox.querySelectorAll('[data-cra7ty-key]');
+      for (var x = 0; x < qFields.length; x++) {
+        var qk = qFields[x].getAttribute('data-cra7ty-key');
+        var parts = qk.split('.'); // home.faq.items.N.field
+        var item = faqItems[Number(parts[3])];
+        qFields[x].textContent = item ? String(item.fields[parts[4]] ?? '') : '';
+      }
+    }
+
+    var testiItems = state.lists['home.testimonials.items'] || [];
+    var testiHtml = '';
+    for (var t = 0; t < testiItems.length; t++) {
+      testiHtml += '<p>&ldquo;' + '' + '&rdquo;</p>'; // filled as text below
+    }
+    var testiBox = document.getElementById('testis');
+    if (testiBox) {
+      testiBox.innerHTML = ''; // reset
+      for (var t2 = 0; t2 < testiItems.length; t2++) {
+        var p = document.createElement('p');
+        p.textContent = '“' + String(testiItems[t2].fields.quote ?? '') + '” — ' + String(testiItems[t2].fields.name ?? '');
+        testiBox.appendChild(p);
+      }
+    }
+
+    document.getElementById('fixture-status').textContent =
+      'fixture: init received · ' + order.length + ' sections · origin ' + (adminOrigin || 'unknown');
+  }
+
+  window.addEventListener('message', function (event) {
+    if (adminOrigin && event.origin !== adminOrigin) return; // fixture allowlists the admin too
+    var msg = event.data;
+    if (!msg || msg.source !== 'cra7ty') return;
+    window.__msgs.push(msg);
+    switch (msg.type) {
+      case 'init':
+        state.values = msg.payload.values || {};
+        state.lists = msg.payload.lists || {};
+        state.sections = msg.payload.sections || null;
+        gotInit = true;
+        render();
+        break;
+      case 'set-field':
+        state.values[msg.payload.key] = msg.payload.value;
+        render();
+        break;
+      case 'set-list':
+        state.lists[msg.payload.key] = msg.payload.items;
+        render();
+        break;
+      case 'set-sections':
+        state.sections = msg.payload;
+        render();
+        break;
+      case 'highlight': {
+        var all = document.querySelectorAll('.hl');
+        for (var h = 0; h < all.length; h++) all[h].classList.remove('hl');
+        var target = document.querySelector('[data-section-key="' + msg.payload.key + '"]') ||
+          document.querySelector('[data-cra7ty-key="' + msg.payload.key + '"]');
+        if (target) target.classList.add('hl');
+        break;
+      }
+      case 'clear': {
+        var all2 = document.querySelectorAll('.hl');
+        for (var c = 0; c < all2.length; c++) all2[c].classList.remove('hl');
+        break;
+      }
+    }
+  });
+
+  document.getElementById('root').addEventListener('click', function (e) {
+    var fieldEl = e.target.closest('[data-cra7ty-key]');
+    if (fieldEl) {
+      e.stopPropagation();
+      var r = fieldEl.getBoundingClientRect();
+      post({ type: 'select-field', payload: {
+        key: fieldEl.getAttribute('data-cra7ty-key'),
+        rect: { top: r.top, left: r.left, width: r.width, height: r.height }
+      }});
+      return;
+    }
+    var label = e.target.closest('[data-sec]');
+    if (label) {
+      post({ type: 'select-section', payload: { page: PAGE, sectionKey: label.getAttribute('data-sec') } });
+    }
+  });
+
+  function readyMsg() {
+    return { type: 'ready', payload: { page: PAGE, keys: KEYS, sections: SECTIONS } };
+  }
+  post(readyMsg());
+  // retry until init lands (admin may still be wiring its listener)
+  var retries = setInterval(function () {
+    if (gotInit) { clearInterval(retries); return; }
+    post(readyMsg());
+  }, 800);
+  render();
+})();
+</script>
+</body>
+</html>

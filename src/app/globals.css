@@ -2,26 +2,105 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------
+   CRA7TY HUB ADMIN — dark-first. Same five studio hues as the
+   storefront, on a darker canvas. Derived shades are alpha ramps,
+   never new colours. The one sanctioned exception is --transit,
+   a muted blue for the in_transit status (paper is too light to
+   carry a status on dark).
+   ------------------------------------------------------------------ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* surfaces */
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --border: #2a2a2a;
+
+  /* studio palette (identical hexes to the main site) */
+  --paper: #f4efe6;
+  --kraft: #d9c7a7;
+  --ink: #16130f;
+  --vermilion: #e5391f;
+  --moss: #3e5641;
+
+  /* derived ramps */
+  --ink-90: rgba(22, 19, 15, 0.9);
+  --ink-70: rgba(22, 19, 15, 0.7);
+  --ink-55: rgba(22, 19, 15, 0.55);
+  --ink-40: rgba(22, 19, 15, 0.4);
+  --ink-24: rgba(22, 19, 15, 0.24);
+  --ink-12: rgba(22, 19, 15, 0.12);
+  --ink-06: rgba(22, 19, 15, 0.06);
+  --paper-70: rgba(244, 239, 230, 0.7);
+  --paper-60: rgba(244, 239, 230, 0.6);
+  --paper-15: rgba(244, 239, 230, 0.15);
+  --paper-12: rgba(244, 239, 230, 0.12);
+  --kraft-60: rgba(217, 199, 167, 0.6);
+  --kraft-30: rgba(217, 199, 167, 0.3);
+  --kraft-12: rgba(217, 199, 167, 0.12);
+  --vermilion-20: rgba(229, 57, 31, 0.2);
+  --moss-bright: #6f8f73;
+  --transit: #7a96b8; /* muted blue — in_transit only */
+
+  /* shadcn semantic mapping (dark-first) */
+  --background: var(--bg);
+  --foreground: var(--paper);
+  --card: var(--surface);
+  --card-foreground: var(--paper);
+  --popover: var(--surface);
+  --popover-foreground: var(--paper);
+  --primary: var(--vermilion);
+  --primary-foreground: var(--paper);
+  --secondary: var(--kraft-12);
+  --secondary-foreground: var(--paper);
+  --muted: var(--paper-12);
+  --muted-foreground: var(--paper-60);
+  --accent: var(--kraft-12);
+  --accent-foreground: var(--paper);
+  --destructive: var(--vermilion);
+  --destructive-foreground: var(--paper);
+  --border: var(--border);
+  --input: #333333;
+  --ring: var(--vermilion);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--paper);
+    font-family: var(--font-body), 'Helvetica Neue', sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
+@layer components {
+  /* hairline inputs — never pills */
+  .input-hairline {
+    @apply w-full rounded-[4px] border border-[#2a2a2a] bg-[#0f0f0f] px-3 py-2 text-sm text-paper placeholder:text-paper-40 focus:border-paper-40 focus:outline-none focus:ring-1 focus:ring-vermilion/40;
+  }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .btn-vermilion {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-[4px] bg-vermilion px-4 text-sm font-medium text-paper transition-colors hover:bg-[#c92f18] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vermilion disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-ghost-dark {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-[4px] border border-[#2a2a2a] bg-transparent px-4 text-sm text-paper-70 transition-colors hover:border-paper-40 hover:text-paper focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vermilion/40;
+  }
+
+  .card-admin {
+    @apply rounded-[4px] border border-[#2a2a2a] bg-[#1a1a1a];
   }
 }
