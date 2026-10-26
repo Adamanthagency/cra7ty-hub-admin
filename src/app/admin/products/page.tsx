@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/admin/page-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { StatusChip } from '@/components/admin/status-chip';
 import { productCategories, products as seed } from '@/data/mock/products';
+import { deleteProduct, fetchProducts, saveProduct } from '@/lib/catalog-api';
 import type { Product } from '@/lib/types';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -26,14 +27,66 @@ function ProductsContent() {
   const searchParams = useSearchParams();
   const lowStockOnly = searchParams.get('filter') === 'low-stock';
 
-  // Local mock state — deletions and bulk changes live in component state.
+  // Instant paint from the seed, then hydrate from the live table — the
+  // database is the source of truth, the seed is only the offline fallback.
   const [rows, setRows] = useState<Product[]>(seed);
+  const [liveStatus, setLiveStatus] = useState<'loading' | 'live' | 'offline'>('loading');
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [stockFilter, setStockFilter] = useState<'all' | 'low'>(
     lowStockOnly ? 'low' : 'all'
   );
   const [selected, setSelected] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProducts()
+      .then((products) => {
+        if (cancelled) return;
+        setRows(products);
+        setLiveStatus('live');
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        setLiveStatus('offline');
+        setLiveError(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Delete on the server first; the local row only leaves on success. */
+  const removeRows = async (ids: string[]) => {
+    setSaveError(null);
+    try {
+      await Promise.all(ids.map((id) => deleteProduct(id)));
+      setRows((prev) => prev.filter((p) => !ids.includes(p.id)));
+      setSelected([]);
+    } catch (error) {
+      setSaveError((error as Error).message);
+    }
+  };
+
+  const bulkSetStatus = async (status: 'active' | 'inactive') => {
+    setSaveError(null);
+    const chosen = rows.filter((p) => selected.includes(p.id));
+    try {
+      await Promise.all(
+        chosen.map((p) => saveProduct({ ...p, status, updatedAt: new Date().toISOString() })),
+      );
+      setRows((prev) =>
+        prev.map((p) => (selected.includes(p.id) ? { ...p, status } : p))
+      );
+      setSelected([]);
+    } catch (error) {
+      setSaveError((error as Error).message);
+    }
+  };
+
+  const bulkDelete = () => removeRows(selected);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -44,18 +97,6 @@ function ProductsContent() {
       return true;
     });
   }, [rows, query, category, stockFilter]);
-
-  const bulkSetStatus = (status: 'active' | 'inactive') => {
-    setRows((prev) =>
-      prev.map((p) => (selected.includes(p.id) ? { ...p, status } : p))
-    );
-    setSelected([]);
-  };
-
-  const bulkDelete = () => {
-    setRows((prev) => prev.filter((p) => !selected.includes(p.id)));
-    setSelected([]);
-  };
 
   const columns: Column<Product>[] = [
     {
@@ -150,7 +191,7 @@ function ProductsContent() {
           <button
             type="button"
             aria-label={`Delete ${p.name}`}
-            onClick={() => setRows((prev) => prev.filter((x) => x.id !== p.id))}
+            onClick={() => void removeRows([p.id])}
             className="rounded-card p-2 text-paper-60 hover:bg-vermilion-20 hover:text-vermilion"
           >
             <Trash2 size={14} />
@@ -172,6 +213,29 @@ function ProductsContent() {
           </Link>
         }
       />
+
+      {/* Live status — never let a local-only list pretend to be the shop */}
+      {liveStatus === 'loading' && (
+        <p className="mb-4 font-mono text-[11px] text-paper-40">
+          Loading live products…
+        </p>
+      )}
+      {liveStatus === 'live' && (
+        <p className="mb-4 font-mono text-[11px] text-paper-40">
+          Live — these are the rows the shop reads.
+        </p>
+      )}
+      {liveStatus === 'offline' && (
+        <p role="alert" className="mb-4 font-mono text-[11px] text-vermilion">
+          Could not reach the server — showing the local copy ({liveError}).
+          Nothing here has been saved to the shop.
+        </p>
+      )}
+      {saveError && (
+        <p role="alert" className="mb-4 font-mono text-[11px] text-vermilion">
+          {saveError}
+        </p>
+      )}
 
       {/* Filter bar */}
       <div className="mb-4 flex flex-wrap items-center gap-3">

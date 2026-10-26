@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Check } from 'lucide-react';
+import { MediaImg } from '@/components/admin/media-img';
 import { SidePanel } from '@/components/admin/side-panel';
 import { useContent } from './content-provider';
 import type { MediaItem } from '@/lib/types';
@@ -58,10 +59,17 @@ export function MediaPicker({ open, onOpenChange, onSelect }: MediaPickerProps) 
                 }}
                 className="group relative flex w-full flex-col overflow-hidden rounded-card border border-line bg-bg/50 text-left transition-colors hover:border-paper-40"
               >
-                <span className="flex aspect-square items-center justify-center bg-kraft-12">
+                <span className="relative flex aspect-square items-center justify-center overflow-hidden bg-kraft-12">
                   <span className="font-display text-2xl text-kraft-60" aria-hidden>
                     {item.filename.charAt(0).toUpperCase()}
                   </span>
+                  {item.url.startsWith('http') && (
+                    <MediaImg
+                      src={item.url}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  )}
                 </span>
                 <span className="flex items-center gap-1 p-2">
                   <Check

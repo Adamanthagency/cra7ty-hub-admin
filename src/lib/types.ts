@@ -7,6 +7,16 @@
 
 export type VariantType = 'colour' | 'size' | 'material';
 
+/** Which procedural 3D model represents a product or illustrates a post.
+ *  Same seven keys the storefront's ModelKey allows. */
+export type ModelKey = 'crane' | 'plate' | 'spoon' | 'box' | 'flower' | 'cup' | 'sheet';
+
+/** One row of a product's detail-page spec table. */
+export interface ProductSpec {
+  label: string;
+  value: string;
+}
+
 export interface ProductVariant {
   /** Stable id, unique within the product. */
   id: string;
@@ -25,13 +35,29 @@ export interface ProductVariant {
 
 export interface Product {
   id: string;
+  /** URL segment for /products/[slug] — unique across the shop. */
+  slug: string;
   name: string;
   description: string;
   category: string;
   /** Whole naira. */
   price: number;
-  /** Struck-through original price; undefined = no comparison shown. */
+  /** Struck-through original price; undefined = no comparison shown.
+   *  Stored, but the storefront does not render it yet — its own Product
+   *  type has no compare price (flagged, not silently wired). */
   compareAtPrice?: number;
+  /** Short mono flag shown on the card, e.g. 'Handfolded'. */
+  badge?: string;
+  /** Procedural model shown on the card and detail route. */
+  model: ModelKey;
+  /** Pack contents line on the detail route. */
+  packCount?: string;
+  /** Physical size line, shown where relevant. */
+  size?: string;
+  /** Longer editorial notes for /products/[slug], one paragraph each. */
+  detail: string[];
+  /** Detail-page spec table. */
+  specs: ProductSpec[];
   stock: number;
   status: 'active' | 'inactive';
   variants: ProductVariant[];
@@ -41,6 +67,8 @@ export interface Product {
     metaTitle?: string;
     metaDescription?: string;
   };
+  /** Shelf order — server-managed: preserved on edit, appended on create. */
+  position: number;
   updatedAt: string; // ISO date
 }
 
@@ -88,17 +116,31 @@ export type PostStatus = 'draft' | 'published';
 export interface BlogPost {
   id: string;
   title: string;
+  /** Masked-headline lines on /blog/[slug] — derived from the title when
+   *  left empty, then editable. */
+  titleLines: string[];
+  /** One-sentence summary under the title and in the page's metadata. */
+  standfirst: string;
   slug: string;
   excerpt: string;
-  /** Markdown body — preview renders the seven toolbar constructs only. */
+  /** Markdown body — preview renders the seven toolbar constructs only.
+   *  Stored in the DB as `body`, an array of markdown blocks. */
   content: string;
   category: string;
+  /** Mono category chip. */
+  model: ModelKey;
+  /** ISO date, YYYY-MM-DD — drives newest-first ordering on /blog. */
+  date: string;
+  /** Reading time in minutes; derived from the body when left empty. */
+  minutes: number;
+  /** Real product ids for the related strip; empty means none. */
+  relatedProductIds: string[];
   tags: string[];
   status: PostStatus;
   placeholder: boolean;
   /** Optional cover image chosen from the media library. */
   coverUrl: string | null;
-  /** ISO date; null while draft. */
+  /** ISO date; set when first published. */
   publishedAt: string | null;
   updatedAt: string; // ISO datetime
 }

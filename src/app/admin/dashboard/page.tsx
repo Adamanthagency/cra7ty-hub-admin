@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Plus, PenLine, Ticket } from 'lucide-react';
+import { ArrowRight, Info, Plus, PenLine, Ticket } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { MonoStat } from '@/components/admin/mono-stat';
 import { StatusChip } from '@/components/admin/status-chip';
@@ -12,6 +12,15 @@ import { formatNgn, formatShortDate } from '@/lib/format';
 
 /** Last month's figures — stand-in comparators until the backend lands. */
 const LAST_MONTH = { orders: 7, revenue: 148500 };
+
+/** Marks any figure below as sample data — none of it is real orders. */
+function DemoChip() {
+  return (
+    <span className="rounded-card border border-dashed border-kraft-30 bg-kraft-12 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-kraft">
+      Demo data
+    </span>
+  );
+}
 
 const quickActions = [
   { label: 'Add product', href: '/admin/products/new', icon: Plus },
@@ -43,6 +52,20 @@ export default function DashboardPage() {
     <div>
       <PageHeader title="Dashboard" subtitle="Tuesday, 22 October 2026" />
 
+      {/* Every number on this page is mock data until checkout is live;
+          the label makes sure none of it reads as real revenue */}
+      <p
+        role="note"
+        className="mb-5 flex items-center gap-2 rounded-card border border-dashed border-kraft-30 bg-kraft-12 px-4 py-3"
+      >
+        <Info size={14} aria-hidden className="shrink-0 text-kraft" />
+        <span className="font-mono text-[11px] leading-relaxed text-kraft">
+          <span className="uppercase tracking-[0.16em]">Demo data</span> —
+          orders, revenue and stock figures below are samples until checkout
+          is live.
+        </span>
+      </p>
+
       {/* Stat tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MonoStat
@@ -71,7 +94,10 @@ export default function DashboardPage() {
         {/* Recent orders */}
         <section className="card-admin overflow-hidden lg:col-span-2">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
-            <h2 className="text-sm font-medium text-paper">Recent orders</h2>
+            <h2 className="flex items-center gap-2 text-sm font-medium text-paper">
+              Recent orders
+              <DemoChip />
+            </h2>
             <Link
               href="/admin/orders"
               className="font-mono text-[11px] text-paper-60 hover:text-paper"
@@ -143,7 +169,10 @@ export default function DashboardPage() {
 
           <section className="card-admin">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
-              <h2 className="text-sm font-medium text-paper">Low stock alert</h2>
+              <h2 className="flex items-center gap-2 text-sm font-medium text-paper">
+                Low stock alert
+                <DemoChip />
+              </h2>
               <span className="font-mono text-[11px] text-vermilion">
                 {lowStock.length}
               </span>

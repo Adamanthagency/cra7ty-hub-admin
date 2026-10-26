@@ -8,6 +8,23 @@ import type { Product } from '@/lib/types';
 export const products: Product[] = [
   {
     id: 'crane-string-20',
+    slug: 'origami-crane-string-20',
+    badge: 'Most ordered',
+    model: 'crane',
+    packCount: '20 cranes',
+    size: 'Thread span 2.4 m',
+    detail: [
+      'Twenty cranes, each folded from a 15 cm square, threaded on waxed cotton cord.',
+      'The knots are double-overhand so the string can carry the weight of its own cranes.',
+      'Twenty-five per cent cheaper than buying singles, and we throw in the spare thread.',
+    ],
+    specs: [
+      { label: 'Quantity', value: '20 cranes' },
+      { label: 'Thread', value: 'Waxed cotton, 2.4 m' },
+      { label: 'Spacing', value: '12 cm' },
+      { label: 'Weight on hang', value: '48 g' },
+    ],
+    position: 2,
     name: 'Origami crane string, 20 pieces',
     description:
       'Twenty cranes on cotton thread, strung and knotted ready to hang across a doorway.',
@@ -31,6 +48,22 @@ export const products: Product[] = [
   },
   {
     id: 'flower-bouquet-12',
+    slug: 'paper-flower-bouquet-12',
+    model: 'flower',
+    packCount: '12 stems',
+    size: '38 cm tall',
+    detail: [
+      'Each stem is a folded card stem carrying a three-layer paper bloom. No wire armature inside the petals.',
+      'Six blooms in kraft, six in vermilion, so the bouquet reads as two tones from across a room.',
+      'Twine-tied at the cut end. Keep it out of water; paper stems do not like water.',
+    ],
+    specs: [
+      { label: 'Stems', value: '12' },
+      { label: 'Height', value: '38 cm' },
+      { label: 'Tones', value: 'Kraft and vermilion' },
+      { label: 'Vase life', value: 'Dry only' },
+    ],
+    position: 3,
     name: 'Paper flower bouquet, 12 stems',
     description:
       'Twelve folded stems in kraft and vermilion, banded with a paper wrap and a twine tie.',
@@ -51,6 +84,22 @@ export const products: Product[] = [
   },
   {
     id: 'gift-box-set-5',
+    slug: 'origami-gift-box-set-5',
+    model: 'box',
+    packCount: '5 boxes',
+    size: '15 x 15 x 8 cm',
+    detail: [
+      'The box closes with a blintz fold: two flaps meet in the middle and hold under their own tension.',
+      'Delivered flat in a board sleeve, folds up in about fifteen seconds each.',
+      'Kraft outside, paper inside. Good enough to post as a gift box on its own.',
+    ],
+    specs: [
+      { label: 'Quantity', value: '5 boxes' },
+      { label: 'Closed size', value: '15 x 15 x 8 cm' },
+      { label: 'Board', value: '1.2 mm greyboard' },
+      { label: 'Adhesive needed', value: 'None' },
+    ],
+    position: 4,
     name: 'Origami gift box, set of 5',
     description:
       'Five folding gift boxes in graduated sizes, pressed flat and popped open at the lid.',
@@ -70,6 +119,23 @@ export const products: Product[] = [
   },
   {
     id: 'plates-9in-25',
+    slug: 'paper-plates-9-inch-25',
+    badge: 'Bagasse',
+    model: 'plate',
+    packCount: '25 plates',
+    size: '9 inch / 23 cm',
+    detail: [
+      'Pressed from sugarcane bagasse, not coated paper, so they go in a home compost within weeks.',
+      'The rim is rolled rather than cut, which is why they can carry a full plate of jollof without flexing.',
+      'Microwave safe. They will not survive a dishwasher, and we would rather say so.',
+    ],
+    specs: [
+      { label: 'Quantity', value: '25 plates' },
+      { label: 'Diameter', value: '23 cm / 9 in' },
+      { label: 'Material', value: 'Sugarcane bagasse' },
+      { label: 'Microwave', value: 'Yes' },
+    ],
+    position: 5,
     name: 'Paper plates, 9-inch (25 pack)',
     description:
       'Pressed bagasse plates with a rolled rim — a plate of jollof does not fold in the hand.',
@@ -88,6 +154,23 @@ export const products: Product[] = [
   },
   {
     id: 'party-pack-20',
+    slug: 'party-pack-20-guests',
+    badge: 'Event ready',
+    model: 'cup',
+    packCount: 'Serves 20',
+    size: '20 place settings',
+    detail: [
+      'Per guest: one 9-inch plate, one side plate, one spoon, one cup and two napkins.',
+      'Counted and banded in a kraft sleeve with the guest number written on the outside.',
+      'Ordered by 500 for a Saturday, everything is packed and ready for pickup on Friday evening.',
+    ],
+    specs: [
+      { label: 'Serves', value: '20 guests' },
+      { label: 'Includes', value: 'Plates, cups, spoons, napkins' },
+      { label: 'Pack size', value: '2 kraft sleeves' },
+      { label: 'Lead time', value: '24 hours in Lagos' },
+    ],
+    position: 9,
     name: 'Party pack, 20 guests',
     description:
       'Per guest: 9-inch plate, side plate, spoon, cup and two napkins. Counted into sleeves, counted again.',
@@ -111,6 +194,22 @@ export const products: Product[] = [
   },
   {
     id: 'origami-paper-100',
+    slug: 'origami-paper-pack-100',
+    model: 'sheet',
+    packCount: '100 sheets',
+    size: '15 cm square, 80 gsm',
+    detail: [
+      'Eleven colours, one hundred sheets, shuffled by hand so no two runs of paper look the same.',
+      '80 gsm. Light enough to fold quickly, heavy enough that the crease stays where you put it.',
+      'Ten of the hundred are double-sided in vermilion for the finishing fold.',
+    ],
+    specs: [
+      { label: 'Quantity', value: '100 sheets' },
+      { label: 'Size', value: '15 cm square' },
+      { label: 'Weight', value: '80 gsm' },
+      { label: 'Colours', value: '11, shuffled' },
+    ],
+    position: 10,
     name: 'Origami paper pack, 100 sheets',
     description:
       'One hundred squares of 80 gsm recycled origami paper in a kraft band.',

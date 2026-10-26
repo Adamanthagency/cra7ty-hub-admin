@@ -2,13 +2,12 @@
 
 import { useRef, useState } from 'react';
 import { Check, Copy, Trash2, Upload } from 'lucide-react';
+import { MediaImg } from '@/components/admin/media-img';
 import { PageHeader } from '@/components/admin/page-header';
 import { ConfirmDialog } from '@/components/admin/workbench/confirm-dialog';
 import { useContent } from '@/components/admin/workbench/content-provider';
 import { MEDIA_RULES } from '@/data/mock/media';
 import type { MediaItem } from '@/lib/types';
-
-let uid = 0;
 
 /** mono bytes → "412 KB" / "1.3 MB" */
 function formatSize(bytes: number): string {
@@ -23,49 +22,74 @@ const TYPE_LABEL: Record<MediaItem['mimeType'], string> = {
 };
 
 export default function MediaPage() {
-  const { media, addMedia, removeMedia } = useContent();
+  const { media, uploadMedia, removeMedia } = useContent();
   const [removing, setRemoving] = useState<MediaItem | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  /** shared failure line for both actions — verbatim from the server */
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /**
-   * UI-only upload: the file is read for name/size/type and a fake item
-   * joins local state. Nothing is transmitted anywhere.
+   * Client pre-check (the SAME rules the server enforces, for instant
+   * feedback), then the real upload: bytes → Supabase Storage bucket
+   * `media`, rows → `media` table, via POST /admin/api/media — up to
+   * MAX_BATCH files per drop/selection, all-or-nothing. Local state
+   * changes only after the server confirms the stored items.
    */
-  const handleFiles = (files: FileList | null) => {
+  const handleFiles = async (files: FileList | null) => {
+    if (uploading) return;
     if (!files || files.length === 0) return;
-    const file = files[0]!;
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    const okType =
-      MEDIA_RULES.acceptedMime.includes(file.type) ||
-      MEDIA_RULES.acceptedTypes.includes(ext as (typeof MEDIA_RULES.acceptedTypes)[number]);
-    if (!okType) {
-      setUploadError(`“${file.name}” is not a jpg, png or webp.`);
-      return;
-    }
-    if (file.size > MEDIA_RULES.maxBytes) {
-      setUploadError(
-        `“${file.name}” is ${formatSize(file.size)} — the limit is ${formatSize(MEDIA_RULES.maxBytes)}.`
+    const batch = Array.from(files);
+    if (batch.length > MEDIA_RULES.maxPerBatch) {
+      setActionError(
+        `${batch.length} files in one drop — the limit is ${MEDIA_RULES.maxPerBatch} per batch.`
       );
       return;
     }
-    setUploadError(null);
-    uid += 1;
-    const mime: MediaItem['mimeType'] = ext === 'png'
-      ? 'image/png'
-      : ext === 'webp'
-        ? 'image/webp'
-        : 'image/jpeg';
-    addMedia({
-      id: `media-${Date.now()}-${uid}`,
-      filename: file.name,
-      url: `/media/${file.name}`,
-      mimeType: mime,
-      sizeBytes: file.size,
-      createdAt: new Date().toISOString(),
-    });
+    for (const file of batch) {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      const okType =
+        MEDIA_RULES.acceptedMime.includes(file.type) ||
+        MEDIA_RULES.acceptedTypes.includes(ext as (typeof MEDIA_RULES.acceptedTypes)[number]);
+      if (!okType) {
+        setActionError(`“${file.name}” is not a jpg, png or webp.`);
+        return;
+      }
+      if (file.size > MEDIA_RULES.maxBytes) {
+        setActionError(
+          `“${file.name}” is ${formatSize(file.size)} — the limit is ${formatSize(MEDIA_RULES.maxBytes)}.`
+        );
+        return;
+      }
+    }
+    setActionError(null);
+    setUploading(true);
+    try {
+      await uploadMedia(batch);
+    } catch (error) {
+      setActionError((error as Error).message);
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  /** Server removes the Storage object AND the row; close only on success. */
+  const confirmRemove = async () => {
+    if (!removing || deleting) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await removeMedia(removing.id);
+      setRemoving(null);
+    } catch (error) {
+      setActionError((error as Error).message);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const copyUrl = async (item: MediaItem) => {
@@ -91,7 +115,16 @@ export default function MediaPage() {
         }
       />
 
-      {/* upload zone — UI only */}
+      {actionError && (
+        <p
+          role="alert"
+          className="mb-4 rounded-card border border-vermilion px-3 py-2 font-mono text-[11px] text-vermilion"
+        >
+          {actionError}
+        </p>
+      )}
+
+      {/* upload zone → POST /admin/api/media */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -101,7 +134,7 @@ export default function MediaPage() {
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          handleFiles(e.dataTransfer.files);
+          void handleFiles(e.dataTransfer.files);
         }}
         className={`mb-4 flex flex-col items-center justify-center gap-2 rounded-card border border-dashed px-4 py-8 text-center transition-colors ${
           dragOver ? 'border-vermilion bg-vermilion-20' : 'border-kraft-30 bg-kraft-12/50'
@@ -109,31 +142,29 @@ export default function MediaPage() {
       >
         <Upload size={18} aria-hidden className="text-kraft-60" />
         <p className="font-mono text-[11px] text-paper-70">
-          Drop a file or click to add — placeholder only, nothing uploads
+          {uploading ? 'Uploading to Storage…' : 'Drop files or click to add'}
         </p>
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-paper-40">
-          jpg, png, webp · max {formatSize(MEDIA_RULES.maxBytes)}
+          jpg, png, webp · up to {MEDIA_RULES.maxPerBatch} at a time · max{' '}
+          {formatSize(MEDIA_RULES.maxBytes)} each
         </p>
         <button
           type="button"
+          disabled={uploading}
           onClick={() => inputRef.current?.click()}
           className="btn-ghost-dark mt-1"
         >
-          Choose file
+          {uploading ? 'Uploading…' : 'Choose files'}
         </button>
         <input
           ref={inputRef}
           type="file"
+          multiple
           accept="image/jpeg,image/png,image/webp"
-          aria-label="Add media file"
+          aria-label="Add media files"
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => void handleFiles(e.target.files)}
         />
-        {uploadError && (
-          <p role="alert" className="font-mono text-[11px] text-vermilion">
-            {uploadError}
-          </p>
-        )}
       </div>
 
       {media.length === 0 ? (
@@ -144,12 +175,20 @@ export default function MediaPage() {
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {media.map((item) => (
             <li key={item.id} className="card-admin group flex flex-col overflow-hidden">
-              {/* kraft thumbnail tile — no real binary behind it */}
-              <div className="relative flex aspect-square items-center justify-center bg-kraft-12">
+              {/* letter tile behind, real thumbnail on top (hidden on a
+                  failed load, so a dead URL degrades to the tile) */}
+              <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-kraft-12">
                 <span className="font-display text-3xl text-kraft-60" aria-hidden>
                   {item.filename.charAt(0).toUpperCase()}
                 </span>
-                <span className="absolute left-2 top-2 rounded-card bg-bg/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-paper-60">
+                {item.url.startsWith('http') && (
+                  <MediaImg
+                    src={item.url}
+                    alt=""
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                )}
+                <span className="absolute left-2 top-2 z-10 rounded-card bg-bg/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-paper-60">
                   {TYPE_LABEL[item.mimeType]}
                 </span>
               </div>
@@ -197,14 +236,13 @@ export default function MediaPage() {
 
       <ConfirmDialog
         open={removing !== null}
-        onOpenChange={(o) => !o && setRemoving(null)}
-        title={`Delete “${removing?.filename ?? ''}”?`}
-        body="Products and posts using this image will keep a broken reference once the backend is wired. Mock only — nothing is removed from storage."
-        confirmLabel="Delete"
-        onConfirm={() => {
-          if (removing) removeMedia(removing.id);
-          setRemoving(null);
+        onOpenChange={(o) => {
+          if (!o && !deleting) setRemoving(null);
         }}
+        title={`Delete “${removing?.filename ?? ''}”?`}
+        body="The file is removed from Supabase Storage and from this library. Pages still referencing it will show a broken image."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        onConfirm={() => void confirmRemove()}
       />
     </div>
   );

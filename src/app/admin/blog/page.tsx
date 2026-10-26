@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { posts as seed } from '@/data/mock/posts';
+import { deletePost, fetchPosts } from '@/lib/catalog-api';
 import type { BlogPost, PostStatus } from '@/lib/types';
 import { formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -17,8 +18,41 @@ function wordCount(post: BlogPost): number {
 
 export default function BlogPage() {
   const router = useRouter();
+  // Instant paint from the seed, then hydrate — the table is the truth.
   const [posts, setPosts] = useState<BlogPost[]>(seed);
+  const [liveStatus, setLiveStatus] = useState<'loading' | 'live' | 'offline'>('loading');
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [tab, setTab] = useState<PostStatus>('published');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPosts()
+      .then((rows) => {
+        if (cancelled) return;
+        setPosts(rows);
+        setLiveStatus('live');
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        setLiveStatus('offline');
+        setLiveError(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Delete on the server first; the row only leaves the list on success. */
+  const remove = async (id: string) => {
+    setSaveError(null);
+    try {
+      await deletePost(id);
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+    } catch (error) {
+      setSaveError((error as Error).message);
+    }
+  };
 
   const counts = useMemo(
     () => ({
@@ -48,6 +82,27 @@ export default function BlogPage() {
           </Link>
         }
       />
+
+      {/* Live status — never let a local-only list pretend to be the blog */}
+      {liveStatus === 'loading' && (
+        <p className="mb-4 font-mono text-[11px] text-paper-40">Loading live posts…</p>
+      )}
+      {liveStatus === 'live' && (
+        <p className="mb-4 font-mono text-[11px] text-paper-40">
+          Live — these are the rows /blog reads.
+        </p>
+      )}
+      {liveStatus === 'offline' && (
+        <p role="alert" className="mb-4 font-mono text-[11px] text-vermilion">
+          Could not reach the server — showing the local copy ({liveError}).
+          Nothing here has been saved to the blog.
+        </p>
+      )}
+      {saveError && (
+        <p role="alert" className="mb-4 font-mono text-[11px] text-vermilion">
+          {saveError}
+        </p>
+      )}
 
       {/* Tabs */}
       <div role="tablist" aria-label="Post status" className="mb-4 flex gap-1">
@@ -127,7 +182,7 @@ export default function BlogPage() {
                   <button
                     type="button"
                     aria-label={`Delete ${post.title}`}
-                    onClick={() => setPosts((prev) => prev.filter((p) => p.id !== post.id))}
+                    onClick={() => void remove(post.id)}
                     className="rounded-card p-2 text-paper-60 hover:bg-vermilion-20 hover:text-vermilion"
                   >
                     <Trash2 size={14} />

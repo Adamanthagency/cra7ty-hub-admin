@@ -1,19 +1,30 @@
 'use client';
 
-import { useMemo, useState, type DragEvent } from 'react';
+import { useMemo, useRef, useState, type DragEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ArrowLeft, Images, Plus, Upload, X } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { VariantIndicator } from '@/components/admin/variant-indicator';
 import { MediaPicker } from '@/components/admin/workbench/media-picker';
+import { useContent } from '@/components/admin/workbench/content-provider';
+import { MediaImg } from '@/components/admin/media-img';
 import { productCategories } from '@/data/mock/products';
-import type { MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
+import { MEDIA_RULES } from '@/data/mock/media';
+import type { MediaItem, ModelKey, Product, ProductVariant, VariantType } from '@/lib/types';
+import { saveProduct } from '@/lib/catalog-api';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /**
  * The product editor form — shared by /admin/products/new and
- * /admin/products/[id]. All state is local; nothing persists.
+ * /admin/products/[id]. Local state while editing; **Save writes one row
+ * to the products table** through /admin/api/products (service role,
+ * server-side) and only reports success after the server confirms it.
+ *
+ * The shape is the storefront's: slug, model, detail[], specs[] drive
+ * /products/[slug], so those fields exist here and are required before a
+ * save is allowed. position is never editable — the server keeps it.
  *
  * Variant model rulings (recorded in the build log):
  * - "Selected" on an indicator = the variant currently being edited;
@@ -21,6 +32,29 @@ import { cn } from '@/lib/utils';
  * - The variant grid below shows every variant of the product (with a
  *   type tag); clicking a row selects it and opens the same drawer.
  */
+
+const MODELS: { value: ModelKey; label: string }[] = [
+  { value: 'crane', label: 'Crane' },
+  { value: 'plate', label: 'Plate' },
+  { value: 'spoon', label: 'Spoon' },
+  { value: 'box', label: 'Gift box' },
+  { value: 'flower', label: 'Flower' },
+  { value: 'cup', label: 'Cup' },
+  { value: 'sheet', label: 'Paper sheet' },
+];
+
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Same slug rules as the blog editor: lowercase, dashes, no doubles. */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
 
 const TYPE_LABEL: Record<VariantType, string> = {
   colour: 'Colour',
@@ -42,6 +76,11 @@ interface ProductEditorProps {
 }
 
 export function ProductEditor({ initial, mode }: ProductEditorProps) {
+  const router = useRouter();
+  // The upload zone writes through the SAME path as the Media page
+  // (POST /admin/api/media → Storage + media table), and the shared
+  // library state updates with it.
+  const { uploadMedia } = useContent();
   const [product, setProduct] = useState<Product>(initial);
   const [activeType, setActiveType] = useState<VariantType>('colour');
   /** Variant being edited — drives indicators + drawer. */
@@ -53,8 +92,18 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
   const [tagDraft, setTagDraft] = useState('');
   const [seoOpen, SeoOpenSet] = useState(false);
   const [saveNote, setSaveNote] = useState<string | null>(null);
+  /** Whether the last note is an error (vermilion) or a success (moss). */
+  const [noteIsError, setNoteIsError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  /** Slug follows the name until it is edited by hand. */
+  const [slugTouched, setSlugTouched] = useState(mode === 'edit');
   const [dragOver, setDragOver] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** photo uploads run on their own, so the Images card carries its own note */
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  const [photoNoteIsError, setPhotoNoteIsError] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const patch = (partial: Partial<Product>) =>
     setProduct((prev) => ({ ...prev, ...partial }));
@@ -101,7 +150,8 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
       setNewTextValue('');
     }
     setAddingValue(null);
-    setSaveNote('Variant added — local state only.');
+    setNoteIsError(false);
+    setSaveNote('Variant added — press Save to keep it with the product.');
   };
 
   const removeVariant = (id: string) => {
@@ -118,11 +168,6 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
     setTagDraft('');
   };
 
-  const addImageSlot = () => {
-    if (product.images.length >= 6) return;
-    patch({ images: [...product.images, `placeholder-${product.images.length + 1}`] });
-  };
-
   const removeImageSlot = (index: number) => {
     patch({ images: product.images.filter((_, i) => i !== index) });
   };
@@ -132,19 +177,135 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
     patch({ images: [...product.images, item.url] });
   };
 
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    addImageSlot();
+  /**
+   * Real upload: drag-and-drop or file picker → the same backing path as
+   * the Media page (Storage bucket + media row, batch max 6, all-or-nothing).
+   * The selected photos land in `images` in selection order — images[0]
+   * is always the first photo picked, which is what the storefront shows
+   * as the product's main image.
+   */
+  const uploadPhotos = async (files: FileList | File[] | null) => {
+    if (uploadingPhotos || !files) return;
+    const batch = Array.from(files);
+    if (batch.length === 0) return;
+
+    const free = 6 - product.images.length;
+    if (free <= 0) {
+      setPhotoNoteIsError(true);
+      setPhotoNote('A product holds at most 6 photos — remove one first.');
+      return;
+    }
+    const selected = batch.slice(0, free);
+
+    for (const file of selected) {
+      const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+      const okType =
+        MEDIA_RULES.acceptedMime.includes(file.type) ||
+        MEDIA_RULES.acceptedTypes.includes(ext as (typeof MEDIA_RULES.acceptedTypes)[number]);
+      if (!okType) {
+        setPhotoNoteIsError(true);
+        setPhotoNote(`“${file.name}” is not a jpg, png or webp — nothing was uploaded.`);
+        return;
+      }
+      if (file.size > MEDIA_RULES.maxBytes) {
+        setPhotoNoteIsError(true);
+        setPhotoNote(
+          `“${file.name}” is ${(file.size / (1024 * 1024)).toFixed(1)} MB — the limit is 5 MB per file. Nothing was uploaded.`
+        );
+        return;
+      }
+    }
+
+    setPhotoNote(null);
+    setUploadingPhotos(true);
+    try {
+      const items = await uploadMedia(selected);
+      patch({ images: [...product.images, ...items.map((item) => item.url)] });
+      setPhotoNoteIsError(false);
+      setPhotoNote(
+        selected.length < batch.length
+          ? `Uploaded ${items.length} photo${items.length === 1 ? '' : 's'} (${batch.length} selected — the 6-photo limit reached). Press Save to keep them with the product.`
+          : `Uploaded ${items.length} photo${items.length === 1 ? '' : 's'}. Press Save to keep them with the product.`
+      );
+    } catch (error) {
+      setPhotoNoteIsError(true);
+      setPhotoNote((error as Error).message);
+    } finally {
+      setUploadingPhotos(false);
+    }
   };
 
-  const save = (status: 'active' | 'inactive') => {
-    patch({ status, updatedAt: new Date().toISOString() });
-    setSaveNote(
-      status === 'active'
-        ? 'Published — mock only, nothing sent to a backend.'
-        : 'Draft saved — mock only, nothing sent to a backend.'
-    );
+  const save = async (status: 'active' | 'inactive') => {
+    setNoteIsError(false);
+    setSaveNote(null);
+
+    const name = product.name.trim();
+    if (!name) {
+      setNoteIsError(true);
+      setSaveNote('The product needs a name before it can be saved.');
+      return;
+    }
+    const slug = (slugTouched ? product.slug.trim() : slugify(name)) || slugify(name);
+    if (!SLUG_RE.test(slug)) {
+      setNoteIsError(true);
+      setSaveNote('The URL slug must be lowercase letters, numbers and dashes — e.g. paper-plates-9-inch-25.');
+      return;
+    }
+    if (!Number.isInteger(product.price) || product.price < 0) {
+      setNoteIsError(true);
+      setSaveNote('Price must be a whole number of naira.');
+      return;
+    }
+    // A published product must show a real photo: at least one http(s)
+    // URL in images (placeholder slots don't count). Same rule the server
+    // enforces in validateProduct — drafts stay exempt.
+    const photoCount = product.images.filter(
+      (src) => src.startsWith('http://') || src.startsWith('https://')
+    ).length;
+    if (status === 'active' && photoCount === 0) {
+      setNoteIsError(true);
+      setSaveNote(
+        'Publishing needs at least one photo — upload one below or pick from the media library. Save draft works without one.'
+      );
+      return;
+    }
+
+    const next: Product = {
+      ...product,
+      // A new product gets its permanent id on first save; edits keep theirs.
+      id: mode === 'new' ? `product-${crypto.randomUUID()}` : product.id,
+      name,
+      slug,
+      status,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setSaving(true);
+    try {
+      const result = await saveProduct(next);
+      setProduct(next);
+      const refreshed = result.revalidate;
+      if (refreshed && !refreshed.ok) {
+        setNoteIsError(true);
+        setSaveNote(
+          `Saved, but refreshing the live site failed — ${refreshed.error ?? 'unknown error'}. The shop will catch up within about 5 minutes.`
+        );
+      } else if (status === 'active') {
+        setSaveNote(
+          refreshed
+            ? `Published — the shop shows it now (site refreshed in ${refreshed.ms} ms).`
+            : 'Published.'
+        );
+      } else {
+        setSaveNote('Saved. It stays hidden from the shop until you set it active.');
+      }
+      if (mode === 'new') router.push(`/admin/products/${next.id}`);
+    } catch (error) {
+      setNoteIsError(true);
+      setSaveNote((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -176,7 +337,10 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
               <input
                 id="product-name"
                 value={product.name}
-                onChange={(e) => patch({ name: e.target.value })}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  patch(slugTouched ? { name } : { name, slug: slugify(name) });
+                }}
                 placeholder="Origami crane string, 20 pieces"
                 className="input-hairline"
               />
@@ -272,6 +436,202 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                   className="input-hairline font-mono"
                 />
               </div>
+            </div>
+          </section>
+
+          {/* ---------------- Shop details — the storefront's shape -------- */}
+          <section className="card-admin space-y-4 p-4 md:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-medium text-paper">Shop details</h2>
+              <span className="font-mono text-[11px] text-paper-60">
+                What /products/[slug] renders
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="product-slug"
+                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+                >
+                  URL slug
+                </label>
+                <input
+                  id="product-slug"
+                  value={product.slug}
+                  onChange={(e) => {
+                    setSlugTouched(true);
+                    patch({ slug: e.target.value.toLowerCase() });
+                  }}
+                  placeholder="origami-crane-string-20"
+                  className="input-hairline font-mono"
+                />
+                <p className="mt-1 font-mono text-[10px] text-paper-50">
+                  /products/{product.slug || '…'} — must be unique
+                </p>
+              </div>
+              <div>
+                <label
+                  htmlFor="product-model"
+                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+                >
+                  3D model
+                </label>
+                <select
+                  id="product-model"
+                  value={product.model}
+                  onChange={(e) => patch({ model: e.target.value as ModelKey })}
+                  className="input-hairline"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div>
+                <label
+                  htmlFor="product-badge"
+                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+                >
+                  Badge
+                </label>
+                <input
+                  id="product-badge"
+                  value={product.badge ?? ''}
+                  onChange={(e) => patch({ badge: e.target.value || undefined })}
+                  placeholder="Optional — e.g. Bagasse"
+                  className="input-hairline"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="product-pack"
+                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+                >
+                  Pack contents
+                </label>
+                <input
+                  id="product-pack"
+                  value={product.packCount ?? ''}
+                  onChange={(e) => patch({ packCount: e.target.value || undefined })}
+                  placeholder="Optional — e.g. 25 plates"
+                  className="input-hairline"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="product-size"
+                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+                >
+                  Size
+                </label>
+                <input
+                  id="product-size"
+                  value={product.size ?? ''}
+                  onChange={(e) => patch({ size: e.target.value || undefined })}
+                  placeholder="Optional — e.g. 9 inch / 23 cm"
+                  className="input-hairline"
+                />
+              </div>
+            </div>
+
+            {/* Editorial paragraphs — one row each, shown on the detail route */}
+            <div>
+              <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60">
+                Detail paragraphs
+              </span>
+              {product.detail.map((line, i) => (
+                <div key={`detail-${i}`} className="mb-2 flex items-start gap-2">
+                  <textarea
+                    aria-label={`Detail paragraph ${i + 1}`}
+                    rows={2}
+                    value={line}
+                    onChange={(e) =>
+                      patch({
+                        detail: product.detail.map((d, j) => (j === i ? e.target.value : d)),
+                      })
+                    }
+                    className="input-hairline resize-y"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove paragraph ${i + 1}`}
+                    onClick={() => patch({ detail: product.detail.filter((_, j) => j !== i) })}
+                    className="mt-1.5 rounded-card p-1.5 text-paper-50 hover:bg-vermilion-20 hover:text-vermilion"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => patch({ detail: [...product.detail, ''] })}
+                className="btn-ghost-dark"
+              >
+                <Plus size={13} aria-hidden />
+                Add paragraph
+              </button>
+            </div>
+
+            {/* Spec table rows */}
+            <div>
+              <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60">
+                Spec table
+              </span>
+              {product.specs.map((spec, i) => (
+                <div
+                  key={`spec-${i}`}
+                  className="mb-2 grid grid-cols-[1fr_1.4fr_auto] items-start gap-2"
+                >
+                  <input
+                    aria-label={`Spec ${i + 1} label`}
+                    value={spec.label}
+                    placeholder="Label"
+                    onChange={(e) =>
+                      patch({
+                        specs: product.specs.map((s, j) =>
+                          j === i ? { ...s, label: e.target.value } : s
+                        ),
+                      })
+                    }
+                    className="input-hairline"
+                  />
+                  <input
+                    aria-label={`Spec ${i + 1} value`}
+                    value={spec.value}
+                    placeholder="Value"
+                    onChange={(e) =>
+                      patch({
+                        specs: product.specs.map((s, j) =>
+                          j === i ? { ...s, value: e.target.value } : s
+                        ),
+                      })
+                    }
+                    className="input-hairline"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove spec row ${i + 1}`}
+                    onClick={() => patch({ specs: product.specs.filter((_, j) => j !== i) })}
+                    className="mt-1.5 rounded-card p-1.5 text-paper-50 hover:bg-vermilion-20 hover:text-vermilion"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => patch({ specs: [...product.specs, { label: '', value: '' }] })}
+                className="btn-ghost-dark"
+              >
+                <Plus size={13} aria-hidden />
+                Add spec row
+              </button>
             </div>
           </section>
 
@@ -601,15 +961,31 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
               ))}
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => save('inactive')} className="btn-ghost-dark flex-1">
+              <button
+                type="button"
+                onClick={() => void save('inactive')}
+                disabled={saving}
+                className="btn-ghost-dark flex-1 disabled:opacity-50"
+              >
                 Save draft
               </button>
-              <button type="button" onClick={() => save('active')} className="btn-vermilion flex-1">
+              <button
+                type="button"
+                onClick={() => void save('active')}
+                disabled={saving}
+                className="btn-vermilion flex-1 disabled:opacity-50"
+              >
                 Publish
               </button>
             </div>
             {saveNote && (
-              <p role="status" className="mt-3 font-mono text-[11px] text-moss-bright">
+              <p
+                role={noteIsError ? 'alert' : 'status'}
+                className={cn(
+                  'mt-3 font-mono text-[11px]',
+                  noteIsError ? 'text-vermilion' : 'text-moss-bright'
+                )}
+              >
                 {saveNote}
               </p>
             )}
@@ -624,11 +1000,15 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                 setDragOver(true);
               }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
-              onClick={addImageSlot}
+              onDrop={(e: DragEvent) => {
+                e.preventDefault();
+                setDragOver(false);
+                void uploadPhotos(e.dataTransfer.files);
+              }}
+              onClick={() => photoInputRef.current?.click()}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && addImageSlot()}
+              onKeyDown={(e) => e.key === 'Enter' && photoInputRef.current?.click()}
               className={cn(
                 'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed px-4 py-6 text-center transition-colors',
                 dragOver ? 'border-vermilion bg-vermilion-20' : 'border-kraft-30 bg-kraft-12/50'
@@ -636,9 +1016,26 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
             >
               <Upload size={16} aria-hidden className="text-kraft-60" />
               <span className="font-mono text-[11px] text-paper-70">
-                Drop or click — placeholder slots, no real upload
+                {uploadingPhotos
+                  ? 'Uploading to Storage…'
+                  : 'Drop or click — real upload to the media library'}
+              </span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
+                jpg, png, webp · up to {MEDIA_RULES.maxPerBatch} at a time · max 5 MB each
               </span>
             </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              aria-label="Upload product photos"
+              className="hidden"
+              onChange={(e) => {
+                void uploadPhotos(e.target.files);
+                e.target.value = '';
+              }}
+            />
             <button
               type="button"
               onClick={() => setPickerOpen(true)}
@@ -658,6 +1055,12 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                     <span className="flex h-full w-full items-center justify-center font-display text-xl text-kraft-60">
                       {src.split('/').pop()?.charAt(0).toUpperCase() ?? 'I'}
                     </span>
+                  ) : src.startsWith('http') ? (
+                    <MediaImg
+                      src={src}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center font-mono text-[9px] text-kraft-60">
                       {src}
@@ -686,6 +1089,17 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                 </div>
               ))}
             </div>
+            {photoNote && (
+              <p
+                role={photoNoteIsError ? 'alert' : 'status'}
+                className={cn(
+                  'mt-3 font-mono text-[11px]',
+                  photoNoteIsError ? 'text-vermilion' : 'text-moss-bright'
+                )}
+              >
+                {photoNote}
+              </p>
+            )}
           </section>
 
           {/* Tags card */}

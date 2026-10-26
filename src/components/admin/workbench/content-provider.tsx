@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -22,16 +23,37 @@ import { categories as categorySeed } from '@/data/mock/categories';
 import { revisions as revisionSeed } from '@/data/mock/revisions';
 import { media as mediaSeed } from '@/data/mock/media';
 import type { Category, Revision, SiteSettings } from '@/lib/types';
+import {
+  fetchLiveContent,
+  fetchMedia,
+  postPublish,
+  removeMedia as removeMediaRequest,
+  uploadMedia as uploadMediaRequest,
+  type ListMap,
+  type RevalidateStatus,
+  type ValueMap,
+} from '@/lib/publish-api';
+
+export type { ListMap, ValueMap } from '@/lib/publish-api';
 
 /**
- * The workbench's whole world, in local state. Publish applies drafts to
- * the live values and writes a Revision; nothing ever leaves the browser.
+ * The workbench's whole world, in local state.
+ *
+ * Stage 4 (backend wiring): the initial /data mocks paint instantly, then
+ * the provider hydrates from Supabase via /admin/api/content — the admin
+ * edits what the storefront actually serves. Publish computes the full
+ * next state locally, POSTs it to /admin/api/publish (which calls
+ * Supabase's `apply_publish` in one transaction and records the
+ * revision), and only applies locally on success — a failed publish
+ * leaves the drafts intact and nothing pretends to be live. Discard is
+ * and stays local: it never writes.
+ *
  * Drafts track list items by stable id — positional content keys
  * (…items.2.question) are derived only for display in revisions.
  */
 
-export type ValueMap = Record<string, string | number>;
-export type ListMap = Record<string, ContentListItem[]>;
+/** live-state connection, surfaced so screens can say what they show */
+export type LiveStatus = 'loading' | 'live' | 'offline';
 
 interface ContentContextValue {
   /* live (published) state */
@@ -41,10 +63,17 @@ interface ContentContextValue {
   settings: SiteSettings;
   categories: Category[];
   revisions: Revision[];
-  /** media library — local-only; "uploads" never leave the browser */
+  /** media library — hydrated live rows; "uploads" go to Storage server-side */
   media: MediaItem[];
-  addMedia: (item: MediaItem) => void;
-  removeMedia: (id: string) => void;
+  /** upload a batch of 1–6 files (POST /admin/api/media) → stored items; throws */
+  uploadMedia: (files: File[]) => Promise<MediaItem[]>;
+  /** remove object + row server-side; throws on failure, state untouched */
+  removeMedia: (id: string) => Promise<void>;
+
+  /** whether the workbench is showing hydrated live data or the local seed */
+  liveStatus: LiveStatus;
+  /** why hydration failed, verbatim from the API — null while live */
+  liveError: string | null;
 
   /* drafts */
   drafts: DraftState[];
@@ -56,10 +85,13 @@ interface ContentContextValue {
   /** any draft touching this page (by key prefix or section id) */
   draftsForPage: (page: PageKey) => DraftState[];
   discardAll: () => void;
-  /** apply drafts to live state, append a Revision, clear drafts */
-  publish: () => Revision;
+  /**
+   * Write the full next state to Supabase (apply_publish) and apply it
+   * locally. Throws on failure — drafts stay, nothing goes live.
+   */
+  publish: () => Promise<Revision & { revalidate?: RevalidateStatus }>;
 
-  /* live-state mutators used after publish / by Stage 6 restore */
+  /* live-state mutators used after publish / by restore */
   setSection: (id: string, patch: Partial<PageSection>) => void;
   moveSection: (id: string, direction: -1 | 1) => void;
   applyValues: (updates: ValueMap) => void;
@@ -67,7 +99,13 @@ interface ContentContextValue {
   applySettings: (patch: Partial<SiteSettings>) => void;
   applyCategories: (next: Category[]) => void;
   addRevision: (rev: Revision) => void;
-  restoreRevision: (rev: Revision) => void;
+  /**
+   * Republish the revision's pre-change values through the same publish
+   * transaction, recording the reversal as a new revision. Throws on
+   * failure. Section moves are display-only in the diff and are not
+   * rolled back.
+   */
+  restoreRevision: (rev: Revision) => Promise<void>;
 }
 
 const ContentContext = createContext<ContentContextValue | null>(null);
@@ -78,6 +116,8 @@ const nextId = (prefix: string) => `${prefix}-${Date.now()}-${++uid}`;
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 export function ContentProvider({ children }: { children: ReactNode }) {
+  // Local seeds paint the first frame and keep the workbench usable when
+  // the API is unreachable; hydration replaces them with live data.
   const [values, setValues] = useState<ValueMap>(() => ({ ...fieldSeed }));
   const [lists, setLists] = useState<ListMap>(() =>
     Object.fromEntries(
@@ -92,6 +132,45 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const [revisions, setRevisions] = useState<Revision[]>(() => clone(revisionSeed));
   const [media, setMedia] = useState<MediaItem[]>(() => clone(mediaSeed));
   const [drafts, setDrafts] = useState<DraftState[]>([]);
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>('loading');
+  const [liveError, setLiveError] = useState<string | null>(null);
+
+  // Hydrate from Supabase once on mount. A failure is not fatal — the
+  // seed stays, liveStatus says so, and publish will report its own error.
+  useEffect(() => {
+    let cancelled = false;
+    fetchLiveContent()
+      .then((live) => {
+        if (cancelled) return;
+        setValues(live.values);
+        setLists(live.lists);
+        setSections(live.sections);
+        setSettings(live.settings);
+        setCategories(live.categories);
+        setRevisions(live.revisions);
+        setLiveError(null);
+        setLiveStatus('live');
+        // The media library hydrates through its own endpoint; if it
+        // fails alone, content that IS live stays live and the seed
+        // thumbnails remain — this must not flip status to offline.
+        return fetchMedia()
+          .then(setMedia)
+          .catch((error: Error) => {
+            console.warn('[admin] media library unavailable:', error.message);
+          });
+      })
+      .catch((error: Error) => {
+        if (cancelled) return;
+        console.warn('[admin] live content unavailable:', error.message);
+        // keep the exact reason — screens show it instead of a vague
+        // "not connected", so a misconfigured deploy names itself
+        setLiveError(error.message);
+        setLiveStatus('offline');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const addDraft = useCallback((draft: Omit<DraftState, 'id' | 'at'>) => {
     setDrafts((prev) => {
@@ -144,7 +223,7 @@ export function ContentProvider({ children }: { children: ReactNode }) {
     [drafts]
   );
 
-  const publish = useCallback((): Revision => {
+  const publish = useCallback(async (): Promise<Revision & { revalidate?: RevalidateStatus }> => {
     const now = new Date().toISOString();
     const changes = drafts.map((d) => ({
       key: d.key,
@@ -152,57 +231,60 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       from: stringifyBefore(d.before),
       to: stringifyAfter(d.after),
     }));
-    const rev: Revision = {
-      id: nextId('rev'),
-      at: now,
-      author: 'Studio',
-      changes,
-    };
+    const rev: Revision = { id: nextId('rev'), at: now, author: 'Studio', changes };
 
-    setValues((prev) => {
-      const next = { ...prev };
-      for (const d of drafts) {
-        if (d.type === 'field') next[d.key] = d.after as string | number;
-      }
-      return next;
-    });
-    setLists((prev) => {
-      const next = { ...prev };
-      for (const d of drafts) {
-        if (d.type === 'list') next[d.key] = clone(d.after as ContentListItem[]);
-      }
-      return next;
-    });
-    setSections((prev) => {
-      const next = clone(prev);
-      for (const d of drafts) {
-        if (d.type !== 'section') continue;
-        const target = next.find((s) => s.id === d.key);
+    // Compute the complete next published state — the same apply
+    // semantics as before, but as data we can hand to the transaction.
+    const nextValues: ValueMap = { ...values };
+    const nextLists: ListMap = clone(lists);
+    const nextSections: PageSection[] = clone(sections);
+    const nextSettings: SiteSettings = { ...settings, seo: { ...settings.seo } };
+    let categoryDraft: DraftState | null = null;
+
+    for (const d of drafts) {
+      if (d.type === 'field') {
+        nextValues[d.key] = d.after as string | number;
+      } else if (d.type === 'list') {
+        nextLists[d.key] = clone(d.after as ContentListItem[]);
+      } else if (d.type === 'section') {
+        const target = nextSections.find((s) => s.id === d.key);
         if (target) Object.assign(target, d.after as Partial<PageSection>);
-      }
-      return next;
-    });
-    setSettings((prev) => {
-      const next = { ...prev };
-      for (const d of drafts) {
-        if (d.type !== 'settings') continue;
+      } else if (d.type === 'settings') {
         const patch = d.after as Partial<SiteSettings>;
-        Object.assign(next, patch);
-        if (patch.seo) next.seo = { ...next.seo, ...patch.seo };
+        Object.assign(nextSettings, patch);
+        if (patch.seo) nextSettings.seo = { ...nextSettings.seo, ...patch.seo };
+      } else if (d.type === 'category') {
+        categoryDraft = d;
       }
-      return next;
-    });
-    setCategories((prev) => {
-      const hasCategory = drafts.some((d) => d.type === 'category');
-      return hasCategory
-        ? (drafts.find((d) => d.type === 'category')!.after as Category[])
-        : prev;
+    }
+
+    // Categories ride the same transaction: the draft's array when one is
+    // pending, otherwise the current live array (apply_publish updates the
+    // fixed-id rows' editable columns and never touches model/count).
+    const nextCategories: Category[] = categoryDraft
+      ? clone(categoryDraft.after as Category[])
+      : clone(categories);
+
+    // One atomic write (apply_publish). Throws on failure — the caller
+    // keeps the drafts and nothing is applied locally.
+    const published = await postPublish({
+      values: nextValues,
+      lists: nextLists,
+      sections: nextSections,
+      settings: nextSettings,
+      categories: nextCategories,
+      revision: rev,
     });
 
+    setValues(nextValues);
+    setLists(nextLists);
+    setSections(nextSections);
+    setSettings(nextSettings);
+    setCategories(nextCategories);
     setRevisions((prev) => [rev, ...prev]);
     setDrafts([]);
-    return rev;
-  }, [drafts]);
+    return { ...rev, revalidate: published.revalidate };
+  }, [drafts, values, lists, sections, settings, categories]);
 
   const setSection = useCallback((id: string, patch: Partial<PageSection>) => {
     setSections((prev) =>
@@ -246,61 +328,87 @@ export function ContentProvider({ children }: { children: ReactNode }) {
     setRevisions((prev) => [rev, ...prev]);
   }, []);
 
-  const addMedia = useCallback((item: MediaItem) => {
-    setMedia((prev) => [item, ...prev]);
+  // Server first, state second: the API call must succeed before the
+  // library changes, so a failed upload/delete never fakes success —
+  // the same rule publish follows.
+  const uploadMedia = useCallback(async (files: File[]): Promise<MediaItem[]> => {
+    const items = await uploadMediaRequest(files);
+    // Server confirmed first; the batch lands at the top in the order it
+    // was selected, so what you just added is what you see.
+    setMedia((prev) => [...items, ...prev]);
+    return items;
   }, []);
 
-  const removeMedia = useCallback((id: string) => {
+  const removeMedia = useCallback(async (id: string): Promise<void> => {
+    await removeMediaRequest(id);
     setMedia((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
-  const restoreRevision = useCallback((rev: Revision) => {
-    // Restore applies each change's "from" value as new live state and
-    // records a fresh revision (per the approved plan).
-    const updates: ValueMap = {};
-    const listRows: { listKey: string; itemId: string; fieldKey: string; value: string }[] = [];
-    for (const c of rev.changes) {
-      if (c.key.startsWith('settings.')) continue;
-      const m = /^(.+):([^:]+):(.+)$/.exec(c.key);
-      if (m) {
-        listRows.push({ listKey: m[1]!, itemId: m[2]!, fieldKey: m[3]!, value: c.from });
-      } else {
-        updates[c.key] = c.from;
+  const restoreRevision = useCallback(
+    async (rev: Revision) => {
+      // Restore applies each change's "from" value as new live state and
+      // republishes through the SAME transaction (the approved
+      // apply_publish-only design), recording the reversal.
+      const sectionIds = new Set(sections.map((s) => s.id));
+      const updates: ValueMap = {};
+      const listRows: {
+        listKey: string;
+        itemId: string;
+        fieldKey: string;
+        value: string;
+      }[] = [];
+      for (const c of rev.changes) {
+        // section changes are display-only in the diff (id, not key) and
+        // cannot be reconstructed from it — sections stay as they are
+        if (sectionIds.has(c.key)) continue;
+        if (c.key.startsWith('settings.')) continue;
+        // Category changes record only counts ("6 items") in the diff —
+        // the pre-edit copy is not recoverable from a revision, so
+        // categories stay as they are rather than being corrupted by
+        // treating the display string as a content key.
+        if (c.key === 'categories') continue;
+        const m = /^(.+):([^:]+):(.+)$/.exec(c.key);
+        if (m) {
+          listRows.push({ listKey: m[1]!, itemId: m[2]!, fieldKey: m[3]!, value: c.from });
+        } else {
+          updates[c.key] = c.from;
+        }
       }
-    }
-    setValues((prev) => ({ ...prev, ...updates }));
-    setLists((prev) => {
-      if (listRows.length === 0) return prev;
-      const next = { ...prev };
+
+      const nextValues: ValueMap = { ...values, ...updates };
+      const nextLists: ListMap = clone(lists);
       for (const row of listRows) {
-        const items = next[row.listKey];
+        const items = nextLists[row.listKey];
         if (!items) continue;
-        next[row.listKey] = items.map((it) =>
-          it.id === row.itemId ? { ...it, fields: { ...it.fields, [row.fieldKey]: row.value } } : it
+        nextLists[row.listKey] = items.map((it) =>
+          it.id === row.itemId
+            ? { ...it, fields: { ...it.fields, [row.fieldKey]: row.value } }
+            : it
         );
       }
-      return next;
-    });
-    setSettings((prev) => {
-      const next = { ...prev, seo: { ...prev.seo } };
+
+      const nextSettings: SiteSettings = { ...settings, seo: { ...settings.seo } };
       for (const c of rev.changes) {
         if (!c.key.startsWith('settings.')) continue;
         const path = c.key.slice('settings.'.length);
         if (path === 'freeDeliveryOver') {
           const n = Number(c.from.replace(/[^0-9]/g, ''));
-          if (Number.isFinite(n)) next.freeDeliveryOver = n;
+          if (Number.isFinite(n)) nextSettings.freeDeliveryOver = n;
         } else {
           const m = /^seo\.(\w+)\.(title|description)$/.exec(path);
           if (m) {
             const pageKey = m[1]! as keyof SiteSettings['seo'];
-            next.seo[pageKey] = { title: '', description: '', ...next.seo[pageKey], [m[2]!]: c.from };
+            nextSettings.seo[pageKey] = {
+              title: '',
+              description: '',
+              ...nextSettings.seo[pageKey],
+              [m[2]!]: c.from,
+            };
           }
         }
       }
-      return next;
-    });
-    setRevisions((prev) => [
-      {
+
+      const reversal: Revision = {
         id: nextId('rev'),
         at: new Date().toISOString(),
         author: 'Studio',
@@ -310,10 +418,24 @@ export function ContentProvider({ children }: { children: ReactNode }) {
           from: c.to,
           to: c.from,
         })),
-      },
-      ...prev,
-    ]);
-  }, []);
+      };
+
+      await postPublish({
+        values: nextValues,
+        lists: nextLists,
+        sections,
+        settings: nextSettings,
+        categories: clone(categories),
+        revision: reversal,
+      });
+
+      setValues(nextValues);
+      setLists(nextLists);
+      setSettings(nextSettings);
+      setRevisions((prev) => [reversal, ...prev]);
+    },
+    [values, lists, sections, settings, categories]
+  );
 
   const value = useMemo<ContentContextValue>(
     () => ({
@@ -324,8 +446,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       categories,
       revisions,
       media,
-      addMedia,
+      uploadMedia,
       removeMedia,
+      liveStatus,
+      liveError,
       drafts,
       addDraft,
       draftValue,
@@ -350,8 +474,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       categories,
       revisions,
       media,
-      addMedia,
+      uploadMedia,
       removeMedia,
+      liveStatus,
+      liveError,
       drafts,
       addDraft,
       draftValue,

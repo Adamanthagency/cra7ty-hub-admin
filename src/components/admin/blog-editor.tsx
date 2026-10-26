@@ -1,16 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ArrowLeft, Images } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { BodyEditor } from '@/components/admin/blog/body-editor';
 import { MediaPicker } from '@/components/admin/workbench/media-picker';
-import type { BlogPost, MediaItem } from '@/lib/types';
+import { MediaImg } from '@/components/admin/media-img';
+import type { BlogPost, MediaItem, ModelKey } from '@/lib/types';
+import { deletePost, fetchProducts, savePost } from '@/lib/catalog-api';
 import { formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 const CATEGORIES = ['Studio practice', 'Materials', 'Wrapping', 'Events', 'Announcement'];
+
+const MODEL_OPTIONS: { value: ModelKey; label: string }[] = [
+  { value: 'crane', label: 'Crane' },
+  { value: 'plate', label: 'Plate' },
+  { value: 'spoon', label: 'Spoon' },
+  { value: 'box', label: 'Gift box' },
+  { value: 'flower', label: 'Flower' },
+  { value: 'cup', label: 'Cup' },
+  { value: 'sheet', label: 'Paper sheet' },
+];
+
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function slugify(text: string): string {
   return text
@@ -19,6 +34,21 @@ function slugify(text: string): string {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
+}
+
+/** Two masked headline lines, split at the word boundary nearest the
+ *  middle — the fallback when the admin leaves the field alone. */
+function deriveTitleLines(title: string): string[] {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return [title.trim()];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}
+
+/** Reading-time estimate used when the field is left empty: 220 wpm. */
+function estimateMinutes(markdown: string): number {
+  const words = markdown.trim() ? markdown.trim().split(/\s+/).length : 0;
+  return Math.max(1, Math.round(words / 220));
 }
 
 interface BlogEditorProps {
@@ -30,13 +60,34 @@ interface BlogEditorProps {
  * Slug rule (standard CMS behaviour): auto-generated from the title
  * on every keystroke until the admin edits the slug field manually,
  * after which it never auto-updates again.
+ *
+ * Save writes ONE row to blog_posts through /admin/api/posts. A draft
+ * saves with status='draft' and is filtered out of the storefront's
+ * getPosts, so nothing unpublished can reach /blog; Publish sets the
+ * status (and the first-published date), then the route asks the
+ * storefront to revalidate on demand — the post shows within seconds
+ * (the storefront's 300s timer is only the fallback for a failed
+ * refresh call, which this editor reports).
  */
 export function BlogEditor({ initial }: BlogEditorProps) {
+  const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(initial !== null);
   const [content, setContent] = useState(initial?.content ?? '');
   const [excerpt, setExcerpt] = useState(initial?.excerpt ?? '');
+  const [standfirst, setStandfirst] = useState(initial?.standfirst ?? '');
+  const [titleLines, setTitleLines] = useState<string[]>(initial?.titleLines ?? []);
+  const [titleLinesTouched, setTitleLinesTouched] = useState(
+    (initial?.titleLines.length ?? 0) > 0
+  );
+  const [date, setDate] = useState(initial?.date ?? new Date().toISOString().slice(0, 10));
+  /** 0 = “auto”, resolved from the body at save time. */
+  const [minutes, setMinutes] = useState(initial?.minutes ?? 0);
+  const [model, setModel] = useState<ModelKey>(initial?.model ?? 'crane');
+  const [relatedProductIds, setRelatedProductIds] = useState<string[]>(
+    initial?.relatedProductIds ?? []
+  );
   const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0]!);
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [tagDraft, setTagDraft] = useState('');
@@ -46,6 +97,31 @@ export function BlogEditor({ initial }: BlogEditorProps) {
   const [coverUrl, setCoverUrl] = useState<string | null>(initial?.coverUrl ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [noteIsError, setNoteIsError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  /** Candidates for the related-products strip (for new posts too). */
+  const [allProducts, setAllProducts] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProducts()
+      .then((rows) => {
+        if (!cancelled) setAllProducts(rows.map((p) => ({ id: p.id, name: p.name })));
+      })
+      .catch(() => {
+        // The picker simply has nothing to offer when the server is down;
+        // saving surfaces its own error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleRelated = (id: string) => {
+    setRelatedProductIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
   const pickCover = (item: MediaItem) => {
     setCoverUrl(item.url);
@@ -55,6 +131,7 @@ export function BlogEditor({ initial }: BlogEditorProps) {
   const handleTitle = (value: string) => {
     setTitle(value);
     if (!slugTouched) setSlug(slugify(value));
+    if (!titleLinesTouched) setTitleLines(deriveTitleLines(value));
   };
 
   const handleSlug = (value: string) => {
@@ -71,16 +148,100 @@ export function BlogEditor({ initial }: BlogEditorProps) {
     setTagDraft('');
   };
 
-  const save = (nextStatus: BlogPost['status']) => {
-    setStatus(nextStatus);
-    if (nextStatus === 'published' && !publishedAt) {
-      setPublishedAt(new Date().toISOString().slice(0, 10));
+  const save = async (nextStatus: BlogPost['status']) => {
+    setNoteIsError(false);
+    setNote(null);
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setNoteIsError(true);
+      setNote('The post needs a title before it can be saved.');
+      return;
     }
-    setNote(
-      nextStatus === 'published'
-        ? 'Published — mock only, nothing sent to a backend.'
-        : 'Draft saved — mock only, nothing sent to a backend.'
-    );
+    if (!SLUG_RE.test(slug.trim())) {
+      setNoteIsError(true);
+      setNote('The slug must be lowercase letters, numbers and dashes.');
+      return;
+    }
+    if (!standfirst.trim()) {
+      setNoteIsError(true);
+      setNote('The post needs a standfirst — it sits under the title and in the page metadata.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setNoteIsError(true);
+      setNote('The date must be YYYY-MM-DD.');
+      return;
+    }
+
+    const lines = titleLines.map((line) => line.trim()).filter(Boolean);
+    const finalLines = lines.length > 0 ? lines : deriveTitleLines(trimmedTitle);
+    const today = new Date().toISOString().slice(0, 10);
+    const payload: BlogPost = {
+      // A new post gets its permanent id on first save; edits keep theirs.
+      id: initial ? initial.id : `post-${crypto.randomUUID()}`,
+      title: trimmedTitle,
+      titleLines: finalLines,
+      standfirst: standfirst.trim(),
+      slug: slug.trim(),
+      excerpt: excerpt.trim(),
+      content,
+      category,
+      model,
+      date,
+      minutes: minutes > 0 ? minutes : estimateMinutes(content),
+      relatedProductIds,
+      tags,
+      status: nextStatus,
+      placeholder,
+      coverUrl,
+      publishedAt: nextStatus === 'published' ? (publishedAt ?? today) : null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setSaving(true);
+    try {
+      const result = await savePost(payload);
+      setStatus(nextStatus);
+      setPublishedAt(payload.publishedAt);
+      const refreshed = result.revalidate;
+      if (nextStatus === 'published' && refreshed && !refreshed.ok) {
+        setNoteIsError(true);
+        setNote(
+          `Saved, but refreshing the live site failed — ${refreshed.error ?? 'unknown error'}. The blog will catch up within about 5 minutes.`
+        );
+      } else {
+        setNote(
+          nextStatus === 'published'
+            ? refreshed
+              ? `Published — the blog shows it now (site refreshed in ${refreshed.ms} ms).`
+              : 'Published.'
+            : 'Draft saved. Drafts never reach the live site.'
+        );
+      }
+      if (!initial) router.push(`/admin/blog/${payload.id}`);
+    } catch (error) {
+      setNoteIsError(true);
+      setNote((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** Delete is a real row removal — only offered on a saved post. */
+  const remove = async () => {
+    if (!initial) return;
+    setNoteIsError(false);
+    setNote(null);
+    setSaving(true);
+    try {
+      await deletePost(initial.id);
+      router.push('/admin/blog');
+    } catch (error) {
+      setNoteIsError(true);
+      setNote((error as Error).message);
+      setSaving(false);
+    }
   };
 
   return (
@@ -150,28 +311,39 @@ export function BlogEditor({ initial }: BlogEditorProps) {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => save('draft')}
-                className="btn-ghost-dark w-full"
+                onClick={() => void save('draft')}
+                disabled={saving}
+                className="btn-ghost-dark w-full disabled:opacity-50"
               >
                 Save draft
               </button>
               <button
                 type="button"
-                onClick={() => save('published')}
-                className="btn-vermilion w-full"
+                onClick={() => void save('published')}
+                disabled={saving}
+                className="btn-vermilion w-full disabled:opacity-50"
               >
                 Publish
               </button>
-              <button
-                type="button"
-                onClick={() => setNote('Deleted — mock only, nothing removed from a backend.')}
-                className="h-9 w-full rounded-card border border-vermilion/40 text-sm text-vermilion hover:bg-vermilion-20"
-              >
-                Delete
-              </button>
+              {initial && (
+                <button
+                  type="button"
+                  onClick={() => void remove()}
+                  disabled={saving}
+                  className="h-9 w-full rounded-card border border-vermilion/40 text-sm text-vermilion hover:bg-vermilion-20 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              )}
             </div>
             {note && (
-              <p role="status" className="mt-3 font-mono text-[11px] leading-snug text-moss-bright">
+              <p
+                role={noteIsError ? 'alert' : 'status'}
+                className={cn(
+                  'mt-3 font-mono text-[11px] leading-snug',
+                  noteIsError ? 'text-vermilion' : 'text-moss-bright'
+                )}
+              >
                 {note}
               </p>
             )}
@@ -182,8 +354,15 @@ export function BlogEditor({ initial }: BlogEditorProps) {
             <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60">
               Cover
             </span>
-            <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-card bg-kraft-12 font-display text-2xl text-kraft-60">
+            <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-card bg-kraft-12 font-display text-2xl text-kraft-60">
               {coverUrl ? 'Cover' : '—'}
+              {coverUrl?.startsWith('http') && (
+                <MediaImg
+                  src={coverUrl}
+                  alt=""
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
             </div>
             <button
               type="button"
@@ -193,6 +372,131 @@ export function BlogEditor({ initial }: BlogEditorProps) {
               <Images size={13} aria-hidden />
               Choose from media
             </button>
+          </section>
+
+          {/* Standfirst — the line under the title and the page metadata */}
+          <section className="card-admin p-3">
+            <label
+              htmlFor="post-standfirst"
+              className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+            >
+              Standfirst
+            </label>
+            <textarea
+              id="post-standfirst"
+              rows={3}
+              value={standfirst}
+              onChange={(e) => setStandfirst(e.target.value)}
+              placeholder="One sentence under the title"
+              className="input-hairline resize-y"
+            />
+          </section>
+
+          {/* Headline lines — the masked headline on /blog/[slug] */}
+          <section className="card-admin p-3">
+            <label
+              htmlFor="post-titlelines"
+              className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+            >
+              Headline lines
+            </label>
+            <textarea
+              id="post-titlelines"
+              rows={2}
+              value={titleLines.join('\n')}
+              onChange={(e) => {
+                setTitleLinesTouched(true);
+                setTitleLines(e.target.value.split('\n'));
+              }}
+              placeholder={'One line per row'}
+              className="input-hairline resize-y font-mono text-xs"
+            />
+            <p className="mt-1 font-mono text-[10px] text-paper-50">
+              Split from the title until you edit them.
+            </p>
+          </section>
+
+          {/* Date, reading time, model */}
+          <section className="card-admin space-y-3 p-3">
+            <div>
+              <label
+                htmlFor="post-date"
+                className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+              >
+                Date
+              </label>
+              <input
+                id="post-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="input-hairline font-mono"
+              />
+              <p className="mt-1 font-mono text-[10px] text-paper-50">Drives newest-first order.</p>
+            </div>
+            <div>
+              <label
+                htmlFor="post-minutes"
+                className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+              >
+                Reading time (min)
+              </label>
+              <input
+                id="post-minutes"
+                type="number"
+                min={1}
+                value={minutes > 0 ? minutes : ''}
+                onChange={(e) => setMinutes(e.target.value === '' ? 0 : Number(e.target.value))}
+                placeholder={`auto (~${estimateMinutes(content)})`}
+                className="input-hairline font-mono"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="post-model"
+                className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
+              >
+                Lead art model
+              </label>
+              <select
+                id="post-model"
+                value={model}
+                onChange={(e) => setModel(e.target.value as ModelKey)}
+                className="input-hairline"
+              >
+                {MODEL_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          {/* Related products — the strip at the foot of the post */}
+          <section className="card-admin p-3">
+            <span className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60">
+              Related products
+            </span>
+            {allProducts.length === 0 ? (
+              <p className="font-mono text-[10px] text-paper-50">Unavailable while offline.</p>
+            ) : (
+              <ul className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                {allProducts.map((p) => (
+                  <li key={p.id}>
+                    <label className="flex cursor-pointer items-start gap-2 text-[11px] leading-snug text-paper-70 hover:text-paper">
+                      <input
+                        type="checkbox"
+                        checked={relatedProductIds.includes(p.id)}
+                        onChange={() => toggleRelated(p.id)}
+                        className="mt-0.5 accent-vermilion"
+                      />
+                      {p.name}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* Category */}

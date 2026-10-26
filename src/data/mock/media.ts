@@ -61,4 +61,6 @@ export const MEDIA_RULES = {
   acceptedTypes: ['jpg', 'png', 'webp'] as const,
   acceptedMime: ['image/jpeg', 'image/png', 'image/webp'],
   maxBytes: 5 * 1024 * 1024,
+  /** files per drop/selection — mirrored by MAX_BATCH in media-store.ts */
+  maxPerBatch: 6,
 };

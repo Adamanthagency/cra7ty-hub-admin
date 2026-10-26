@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { FieldInput } from '@/components/admin/workbench/field-input';
@@ -47,6 +47,14 @@ export default function CategoriesPage() {
   }, [rows]);
 
   const canSave = hasChanges && Object.keys(errors).length === 0;
+
+  // Hydration replaces the seed after mount — adopt the live rows until the
+  // admin has actually started editing, so the form never sits on stale copy.
+  useEffect(() => {
+    if (!hasChanges) {
+      setRows(JSON.parse(JSON.stringify(categories)) as Category[]);
+    }
+  }, [categories, hasChanges]);
 
   const patchRow = (id: string, partial: Partial<Category>) => {
     setNote(null);

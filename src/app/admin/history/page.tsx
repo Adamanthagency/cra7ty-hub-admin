@@ -10,27 +10,80 @@ import type { Revision } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 /**
- * History: every published revision, newest first. Expand one to read its
- * diff (from → to per changed key); Restore rolls the live state back to
- * this revision's pre-change values and records the reversal as a new
- * revision. Local mock only — nothing leaves the browser.
+ * History: every published revision from Supabase, newest first. Expand
+ * one to read its diff (from → to per changed key); Restore republishes
+ * this revision's pre-change values through the same publish transaction
+ * and records the reversal as a new revision. Field, list and settings
+ * changes restore; section moves are display-only in the diff and stay
+ * as they are.
  */
 export default function HistoryPage() {
-  const { revisions, restoreRevision } = useContent();
+  const { revisions, restoreRevision, liveStatus, liveError } = useContent();
   const [expanded, setExpanded] = useState<string | null>(revisions[0]?.id ?? null);
   const [confirming, setConfirming] = useState<Revision | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  const runRestore = async (rev: Revision) => {
+    setBusy(true);
+    try {
+      await restoreRevision(rev);
+      setNote({
+        tone: 'ok',
+        text: 'Restored — the previous values are live again and the reversal is recorded as a new revision.',
+      });
+    } catch (error) {
+      setNote({
+        tone: 'error',
+        text: `Restore failed: ${(error as Error).message}. Nothing was changed.`,
+      });
+    } finally {
+      setBusy(false);
+      setConfirming(null);
+    }
+  };
 
   return (
     <div className="max-w-3xl">
       <PageHeader
         title="History"
         subtitle={`${revisions.length} revision${revisions.length === 1 ? '' : 's'}`}
-        right={<span className="font-mono text-[11px] text-paper-40">Newest first</span>}
+        right={
+          <span
+            title={liveError ?? undefined}
+            className={cn(
+              'font-mono text-[11px]',
+              liveStatus === 'live' ? 'text-moss-bright' : 'text-paper-40'
+            )}
+          >
+            {liveStatus === 'loading'
+              ? 'Connecting…'
+              : liveStatus === 'live'
+                ? 'Live from Supabase · newest first'
+                : 'Not connected — showing local seed'}
+          </span>
+        }
       />
+
+      {note && (
+        <p
+          role="status"
+          className={cn(
+            'mb-4 rounded-card border px-3 py-2 font-mono text-[11px]',
+            note.tone === 'error'
+              ? 'border-vermilion/40 bg-vermilion-20 text-vermilion'
+              : 'border-line bg-surface text-moss-bright'
+          )}
+        >
+          {note.text}
+        </p>
+      )}
 
       {revisions.length === 0 ? (
         <p className="rounded-card border border-dashed border-line p-8 text-center font-mono text-xs text-paper-60">
-          No revisions yet — publish a change from any editing screen and it lands here.
+          {liveStatus === 'offline'
+            ? `Revisions are unavailable — ${liveError ?? 'the server could not reach Supabase.'} (Full booleans: /admin/api/diagnostics.)`
+            : 'No revisions yet — publish a change from any editing screen and it lands here.'}
         </p>
       ) : (
         <ul className="relative space-y-2 border-l border-line pl-5">
@@ -128,11 +181,10 @@ export default function HistoryPage() {
         open={confirming !== null}
         onOpenChange={(o) => !o && setConfirming(null)}
         title="Restore this revision?"
-        body={`The ${confirming?.changes.length ?? 0} field${confirming?.changes.length === 1 ? '' : 's'} changed in this revision will roll back to their values before it. The reversal is recorded as a new revision. Mock only — nothing is sent to a backend.`}
-        confirmLabel="Restore"
+        body={`The ${confirming?.changes.length ?? 0} field${confirming?.changes.length === 1 ? '' : 's'} changed in this revision will roll back to their values before it, through the same publish transaction. The reversal is recorded as a new revision.`}
+        confirmLabel={busy ? 'Restoring…' : 'Restore'}
         onConfirm={() => {
-          if (confirming) restoreRevision(confirming);
-          setConfirming(null);
+          if (confirming) void runRestore(confirming);
         }}
       />
     </div>
