@@ -199,6 +199,14 @@ const homeFields: ContentField[] = [
   { key: 'home.hero.secondary-cta.href', label: 'Secondary button link', type: 'link', value: '/#bulk', maxLength: 120, required: true },
   { key: 'home.hero.art-caption-left', label: 'Art caption, left', type: 'text', value: 'Hover, then scroll', maxLength: 32, required: true },
   { key: 'home.hero.art-caption-right', label: 'Art caption, right', type: 'text', value: 'Procedural · no files', maxLength: 32, required: true },
+  {
+    key: 'home.hero.art-image',
+    label: 'Hero image (empty = the folded crane art)',
+    type: 'image',
+    value: '',
+    maxLength: 500,
+    required: false,
+  },
 
   // ---- categories (site.ts sections.categories + Categories.tsx JSX) ----
   { key: 'home.categories.index', label: 'Section index', type: 'text', value: '01', maxLength: 4, required: true },
@@ -733,6 +741,14 @@ const aboutFields: ContentField[] = [
   },
   { key: 'about.hero.art-caption', label: 'Art caption', type: 'text', value: 'One crane, folded in the studio', maxLength: 40, required: true },
   { key: 'about.hero.art-note', label: 'Art note', type: 'text', value: 'Drawn, not photographed', maxLength: 32, required: true },
+  {
+    key: 'about.hero.art-image',
+    label: 'About hero image (empty = the drawn crane art)',
+    type: 'image',
+    value: '',
+    maxLength: 500,
+    required: false,
+  },
 
   // sheet (site.ts aboutPage.sheet)
   { key: 'about.sheet.index', label: 'Section index', type: 'text', value: '01', maxLength: 4, required: true },

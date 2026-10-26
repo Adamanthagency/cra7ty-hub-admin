@@ -46,7 +46,7 @@ export interface LiveContent {
   lists: ListMap;
   sections: PageSection[];
   settings: SiteSettings;
-  /** the six fixed categories, in live order */
+  /** the category rows, in live order (add/remove allowed) */
   categories: Category[];
   revisions: Revision[];
 }

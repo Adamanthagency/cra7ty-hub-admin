@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/admin/page-header';
+import { MonoStat } from '@/components/admin/mono-stat';
 import {
   ChartContainer,
   ChartTooltip,
@@ -8,67 +10,128 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
+import { fetchAnalytics, type AnalyticsSummary } from '@/lib/orders-api';
+import { formatNgn } from '@/lib/format';
 
 /**
- * Scaffold only. Each tile renders a real (empty) shadcn/recharts chart
- * with zero data, so wiring the backend is a data swap — the axes and
- * container are already live.
+ * Analytics — real aggregates from the orders table (Tier 4). The
+ * endpoint computes everything server-side; this screen is a pure
+ * render. Revenue counts PAID orders only, by payment date.
+ *
+ * The old scaffold's four "coming soon" tiles shrink to the three that
+ * have honest data today (promo-code usage lives on the Promo codes
+ * manager, per code) plus a totals strip.
  */
 
-const ZERO_SERIES = [
-  { label: 'A', value: 0 },
-  { label: 'B', value: 0 },
-  { label: 'C', value: 0 },
-  { label: 'D', value: 0 },
-];
-
 const lineConfig = {
-  value: { label: 'Value', color: '#d9c7a7' },
+  value: { label: 'Revenue', color: '#d9c7a7' },
 } satisfies ChartConfig;
 
 const barConfig = {
-  value: { label: 'Value', color: '#3e5641' },
+  value: { label: 'Orders', color: '#3e5641' },
 } satisfies ChartConfig;
 
-function EmptyState({ chartKey }: { chartKey: string }) {
-  return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <div className="rounded-card border border-kraft-30 bg-kraft-12 px-4 py-3 text-center">
-        <p className="font-mono text-[11px] leading-relaxed text-kraft">
-          Data will appear here once orders are live
-        </p>
-        <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.2em] text-kraft-60">
-          {chartKey}
-        </p>
-      </div>
-    </div>
-  );
-}
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  in_transit: 'In transit',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
 
 function ChartTile({
   title,
-  chartKey,
-  type,
+  children,
+  note,
 }: {
   title: string;
-  chartKey: string;
-  type: 'line' | 'bar';
+  children: React.ReactNode;
+  note?: string;
 }) {
   return (
     <section className="card-admin p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium text-paper">{title}</h2>
-        <span className="rounded-card border border-kraft-30 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-kraft-60">
-          Coming soon
-        </span>
+        {note && (
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper-40">
+            {note}
+          </span>
+        )}
       </div>
-      <div className="relative">
-        <ChartContainer config={type === 'line' ? lineConfig : barConfig} className="h-48 w-full">
-          {type === 'line' ? (
-            <LineChart data={ZERO_SERIES} margin={{ left: 8, right: 8, top: 8 }}>
+      {children}
+    </section>
+  );
+}
+
+export default function AnalyticsPage() {
+  const [data, setData] = useState<AnalyticsSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchAnalytics()
+      .then((summary) => {
+        if (live) setData(summary);
+      })
+      .catch((e) => {
+        if (live) setError((e as Error).message);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (error) {
+    return (
+      <div>
+        <PageHeader title="Analytics" />
+        <div className="card-admin p-8 text-center">
+          <p className="font-mono text-sm text-paper-60">
+            Could not load analytics — {error}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div>
+        <PageHeader title="Analytics" />
+        <div className="card-admin p-8 text-center">
+          <p className="font-mono text-sm text-paper-60">Loading analytics…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const statusRows = Object.entries(data.byStatus).map(([status, value]) => ({
+    label: STATUS_LABELS[status] ?? status,
+    value,
+  }));
+
+  return (
+    <div>
+      <PageHeader
+        title="Analytics"
+        subtitle={`${data.totals.orders} orders · ${formatNgn(data.totals.revenue)} paid revenue`}
+      />
+
+      {/* Totals strip */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MonoStat label="Paid revenue" value={formatNgn(data.totals.revenue)} />
+        <MonoStat label="Paid orders" value={String(data.totals.paidOrders)} />
+        <MonoStat label="Delivered today" value={String(data.totals.deliveredToday)} />
+        <MonoStat label="Needs review" value={String(data.totals.needsReview)} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartTile title="Revenue, last 14 days" note="paid orders">
+          <ChartContainer config={lineConfig} className="h-48 w-full">
+            <LineChart data={data.days} margin={{ left: 8, right: 8, top: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
               <XAxis
-                dataKey="label"
+                dataKey="day"
                 stroke="#3a3a3a"
                 tickLine={false}
                 axisLine={false}
@@ -79,11 +142,11 @@ function ChartTile({
                 tickLine={false}
                 axisLine={false}
                 tick={{ fontSize: 10, fontFamily: 'monospace' }}
-                width={32}
+                width={40}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Line
-                dataKey="value"
+                dataKey="revenue"
                 type="monotone"
                 stroke="#d9c7a7"
                 strokeWidth={2}
@@ -91,8 +154,12 @@ function ChartTile({
                 isAnimationActive={false}
               />
             </LineChart>
-          ) : (
-            <BarChart data={ZERO_SERIES} margin={{ left: 8, right: 8, top: 8 }}>
+          </ChartContainer>
+        </ChartTile>
+
+        <ChartTile title="Orders by status">
+          <ChartContainer config={barConfig} className="h-48 w-full">
+            <BarChart data={statusRows} margin={{ left: 8, right: 8, top: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
               <XAxis
                 dataKey="label"
@@ -105,37 +172,74 @@ function ChartTile({
                 stroke="#3a3a3a"
                 tickLine={false}
                 axisLine={false}
+                allowDecimals={false}
                 tick={{ fontSize: 10, fontFamily: 'monospace' }}
                 width={32}
               />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="value" fill="#3e5641" radius={[2, 2, 0, 0]} isAnimationActive={false} />
             </BarChart>
+          </ChartContainer>
+        </ChartTile>
+
+        <ChartTile title="Top products by units sold" note="paid orders">
+          {data.topProducts.length === 0 ? (
+            <p className="flex h-48 items-center justify-center font-mono text-xs text-paper-60">
+              No paid orders yet.
+            </p>
+          ) : (
+            <ChartContainer config={barConfig} className="h-48 w-full">
+              <BarChart data={data.topProducts} margin={{ left: 8, right: 8, top: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  stroke="#3a3a3a"
+                  tickLine={false}
+                  axisLine={false}
+                  interval={0}
+                  tick={{ fontSize: 9, fontFamily: 'monospace' }}
+                  angle={-20}
+                  height={50}
+                />
+                <YAxis
+                  stroke="#3a3a3a"
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  tick={{ fontSize: 10, fontFamily: 'monospace' }}
+                  width={32}
+                />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Bar dataKey="units" fill="#3e5641" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ChartContainer>
           )}
-        </ChartContainer>
-        <EmptyState chartKey={chartKey} />
-      </div>
-    </section>
-  );
-}
+        </ChartTile>
 
-export default function AnalyticsPage() {
-  return (
-    <div>
-      <PageHeader
-        title="Analytics"
-        right={
-          <span className="rounded-card border border-kraft-30 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-kraft-60">
-            Coming soon
-          </span>
-        }
-      />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartTile title="Revenue over time" chartKey="revenue-over-time" type="line" />
-        <ChartTile title="Orders by status" chartKey="orders-by-status" type="bar" />
-        <ChartTile title="Top products by revenue" chartKey="top-products" type="bar" />
-        <ChartTile title="Promo code usage" chartKey="promo-usage" type="line" />
+        <ChartTile title="Orders per day, last 14 days" note="paid orders">
+          <ChartContainer config={barConfig} className="h-48 w-full">
+            <BarChart data={data.days} margin={{ left: 8, right: 8, top: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis
+                dataKey="day"
+                stroke="#3a3a3a"
+                tickLine={false}
+                axisLine={false}
+                tick={{ fontSize: 10, fontFamily: 'monospace' }}
+              />
+              <YAxis
+                stroke="#3a3a3a"
+                tickLine={false}
+                axisLine={false}
+                allowDecimals={false}
+                tick={{ fontSize: 10, fontFamily: 'monospace' }}
+                width={32}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="orders" fill="#3e5641" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ChartContainer>
+        </ChartTile>
       </div>
     </div>
   );

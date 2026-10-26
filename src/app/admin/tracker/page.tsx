@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, ChevronDown } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip } from '@/components/admin/status-chip';
 import { StatusTimeline, forwardStatuses } from '@/components/admin/status-timeline';
 import { orders as seed, orderItemCount, orderTotal } from '@/data/mock/orders';
+import { fetchOrders, setOrderStatus } from '@/lib/orders-api';
 import type { Order, OrderStatus } from '@/lib/types';
 import { formatDateTime, formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -17,9 +18,24 @@ function statusOptions(current: OrderStatus): OrderStatus[] {
 export default function TrackerPage() {
   // One local state tree: summary strip, rows and timeline all read it,
   // so status changes reflect everywhere at once (no hardcoding).
+  // Seed first for instant paint, then hydrate from the real orders table.
   const [state, setState] = useState<Order[]>(seed);
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchOrders()
+      .then((data) => {
+        if (live) setState(data);
+      })
+      .catch(() => {
+        // backend unreachable — the seed stays as the fallback
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -48,14 +64,16 @@ export default function TrackerPage() {
       .slice(0, 10);
   }, [state, query]);
 
+  // The database enforces forward-only (apply_order_status) — a rejected
+  // jump keeps the row unchanged; the server's answer is the truth.
   const setStatus = (id: string, next: OrderStatus) => {
-    setState((prev) =>
-      prev.map((o) =>
-        o.id === id
-          ? { ...o, status: next, updatedAt: new Date().toISOString() }
-          : o
-      )
-    );
+    setOrderStatus(id, next)
+      .then((updated) => {
+        setState((prev) => prev.map((o) => (o.id === id ? updated : o)));
+      })
+      .catch(() => {
+        // illegal transition or offline: keep the current row as-is
+      });
   };
 
   return (

@@ -1,27 +1,67 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, MessageCircle } from 'lucide-react';
 import { StatusChip } from '@/components/admin/status-chip';
 import { StatusTimeline, forwardStatuses } from '@/components/admin/status-timeline';
-import { orders, orderSubtotal } from '@/data/mock/orders';
-import type { OrderStatus } from '@/lib/types';
+import { orders as seedOrders, orderSubtotal } from '@/data/mock/orders';
+import { fetchOrder, setOrderStatus, saveOrderNotes } from '@/lib/orders-api';
+import type { Order, OrderStatus } from '@/lib/types';
 import { formatNgn, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
-  const seed = orders.find((o) => o.id === params.id);
 
-  // Local state so status updates re-render chip + timeline immediately.
-  const [status, setStatus] = useState<OrderStatus | undefined>(seed?.status);
+  // Instant paint from the seed when the id matches one, then hydrate
+  // from the real orders table — the DB is the source of truth.
+  const [order, setOrder] = useState<Order | undefined>(
+    () => seedOrders.find((o) => o.id === params.id)
+  );
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | ''>('');
-  const [notes, setNotes] = useState(seed?.notes ?? '');
-  const [savedNote, setSavedNote] = useState(false);
+  const [notes, setNotes] = useState(order?.notes ?? '');
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [flash, setFlash] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
-  if (!seed || status === undefined) {
+  useEffect(() => {
+    let live = true;
+    fetchOrder(params.id)
+      .then((data) => {
+        if (!live) return;
+        setOrder(data);
+        setNotes(data.notes ?? '');
+      })
+      .catch((error) => {
+        if (!live) return;
+        const message = (error as Error).message;
+        if (message.includes('404') || message.includes('No such order')) {
+          setNotFound(true);
+        } else {
+          // keep whatever the seed painted; say why hydration stopped
+          setFlash({ kind: 'error', text: message });
+        }
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="card-admin p-8 text-center">
+        <p className="font-mono text-sm text-paper-60">Loading order…</p>
+      </div>
+    );
+  }
+
+  if (notFound || !order) {
     return (
       <div className="card-admin p-8 text-center">
         <p className="font-mono text-sm text-paper-60">
@@ -34,14 +74,38 @@ export default function OrderDetailPage() {
     );
   }
 
-  const subtotal = orderSubtotal(seed);
-  const options = forwardStatuses(status);
+  const subtotal = orderSubtotal(order);
+  const options = forwardStatuses(order.status);
 
-  const applyStatus = () => {
-    if (!pendingStatus) return;
-    setStatus(pendingStatus);
-    setPendingStatus('');
-    setSavedNote(true);
+  // Status changes go through the API → apply_order_status RPC: the
+  // DATABASE enforces forward-only, so a rejected jump surfaces as an
+  // honest error instead of optimistic local state.
+  const applyStatus = async () => {
+    if (!pendingStatus || !order) return;
+    setFlash(null);
+    try {
+      const updated = await setOrderStatus(order.id, pendingStatus);
+      setOrder(updated);
+      setPendingStatus('');
+      setFlash({ kind: 'ok', text: 'Status updated.' });
+    } catch (error) {
+      setFlash({ kind: 'error', text: (error as Error).message });
+    }
+  };
+
+  const saveNotes = async () => {
+    if (!order || savingNotes) return;
+    setSavingNotes(true);
+    setFlash(null);
+    try {
+      const updated = await saveOrderNotes(order.id, notes);
+      setOrder(updated);
+      setFlash({ kind: 'ok', text: 'Notes saved.' });
+    } catch (error) {
+      setFlash({ kind: 'error', text: (error as Error).message });
+    } finally {
+      setSavingNotes(false);
+    }
   };
 
   return (
@@ -56,9 +120,21 @@ export default function OrderDetailPage() {
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <h1 className="font-display text-2xl tracking-tight text-paper">
-          Order {seed.id}
+          Order {order.id}
         </h1>
-        <StatusChip status={status} />
+        <StatusChip status={order.status} />
+        {order.needsReview && (
+          <span
+            title={
+              order.reviewReason
+                ? `Flagged: ${order.reviewReason.replaceAll('_', ' ')}`
+                : 'Flagged for manual review'
+            }
+            className="inline-flex items-center gap-1.5 rounded-card border border-vermilion px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-vermilion"
+          >
+            ● needs review
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -79,7 +155,7 @@ export default function OrderDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {seed.items.map((item, i) => (
+                {order.items.map((item, i) => (
                   <tr key={i} className="border-b border-line/60">
                     <td className="px-4 py-3">
                       <span className="block text-paper">{item.productName}</span>
@@ -110,14 +186,14 @@ export default function OrderDetailPage() {
                     {formatNgn(subtotal)}
                   </td>
                 </tr>
-                {seed.discount !== undefined && seed.discount > 0 && (
+                {order.discount !== undefined && order.discount > 0 && (
                   <tr className="border-b border-line/60">
                     <td colSpan={3} className="px-4 py-2.5 text-right text-paper-60">
                       Discount{' '}
-                      <span className="text-vermilion">[{seed.promoCode}]</span>
+                      <span className="text-vermilion">[{order.promoCode}]</span>
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-vermilion">
-                      −{formatNgn(seed.discount)}
+                      −{formatNgn(order.discount)}
                     </td>
                   </tr>
                 )}
@@ -126,7 +202,7 @@ export default function OrderDetailPage() {
                     Delivery fee
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-paper-70">
-                    {formatNgn(seed.deliveryFee)}
+                    {formatNgn(order.deliveryFee)}
                   </td>
                 </tr>
                 <tr>
@@ -134,7 +210,7 @@ export default function OrderDetailPage() {
                     Total
                   </td>
                   <td className="px-4 py-3 text-right text-base tabular-nums text-paper">
-                    {formatNgn(subtotal - (seed.discount ?? 0) + seed.deliveryFee)}
+                    {formatNgn(subtotal - (order.discount ?? 0) + order.deliveryFee)}
                   </td>
                 </tr>
               </tfoot>
@@ -147,7 +223,7 @@ export default function OrderDetailPage() {
           {/* Status card — the tracker flow's main action */}
           <section className="card-admin p-4">
             <h2 className="mb-4 text-sm font-medium text-paper">Status</h2>
-            <StatusTimeline status={status} />
+            <StatusTimeline status={order.status} />
 
             <div className="mt-2 border-t border-line pt-4">
               <label
@@ -179,7 +255,7 @@ export default function OrderDetailPage() {
                 </select>
                 <button
                   type="button"
-                  onClick={applyStatus}
+                  onClick={() => void applyStatus()}
                   disabled={!pendingStatus}
                   className="btn-vermilion"
                 >
@@ -189,9 +265,15 @@ export default function OrderDetailPage() {
               <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.16em] text-paper-40">
                 Forward only — no going back
               </p>
-              {savedNote && (
-                <p role="status" className="mt-2 font-mono text-[11px] text-moss-bright">
-                  Status updated — local state only.
+              {flash && (
+                <p
+                  role="status"
+                  className={cn(
+                    'mt-2 font-mono text-[11px]',
+                    flash.kind === 'ok' ? 'text-moss-bright' : 'text-vermilion'
+                  )}
+                >
+                  {flash.text}
                 </p>
               )}
             </div>
@@ -200,15 +282,20 @@ export default function OrderDetailPage() {
           {/* Customer card */}
           <section className="card-admin p-4">
             <h2 className="mb-3 text-sm font-medium text-paper">Customer</h2>
-            <p className="text-sm text-paper">{seed.customerName}</p>
+            <p className="text-sm text-paper">{order.customerName}</p>
             <a
-              href={`whatsapp://send?phone=${seed.customerPhone.replace('+', '')}`}
+              href={`whatsapp://send?phone=${order.customerPhone.replace('+', '')}`}
               className="mt-1.5 inline-flex items-center gap-1.5 font-mono text-xs text-paper-60 hover:text-moss-bright"
             >
               <MessageCircle size={13} aria-hidden />
-              {seed.customerPhone}
+              {order.customerPhone}
             </a>
-            <p className="mt-2 text-sm text-paper-60">{seed.deliveryAddress}</p>
+            {order.customerEmail && (
+              <p className="mt-1.5 font-mono text-xs text-paper-60">
+                {order.customerEmail}
+              </p>
+            )}
+            <p className="mt-2 text-sm text-paper-60">{order.deliveryAddress}</p>
           </section>
 
           {/* Payment card */}
@@ -217,18 +304,18 @@ export default function OrderDetailPage() {
             <dl className="space-y-2 font-mono text-xs">
               <div className="flex justify-between gap-3">
                 <dt className="text-paper-60">Reference</dt>
-                <dd className="tabular-nums text-paper">{seed.paymentRef}</dd>
+                <dd className="tabular-nums text-paper">{order.paymentRef}</dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-paper-60">Amount</dt>
                 <dd className="tabular-nums text-paper">
-                  {formatNgn(subtotal - (seed.discount ?? 0) + seed.deliveryFee)}
+                  {formatNgn(subtotal - (order.discount ?? 0) + order.deliveryFee)}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-paper-60">Date</dt>
                 <dd className="tabular-nums text-paper-70">
-                  {formatDateTime(seed.paymentDate)}
+                  {order.paymentDate ? formatDateTime(order.paymentDate) : '—'}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
@@ -236,10 +323,10 @@ export default function OrderDetailPage() {
                 <dd>
                   <span
                     className={cn(
-                      seed.paymentStatus === 'paid' ? 'text-moss-bright' : 'text-vermilion'
+                      order.paymentStatus === 'paid' ? 'text-moss-bright' : 'text-vermilion'
                     )}
                   >
-                    {seed.paymentStatus}
+                    {order.paymentStatus}
                   </span>
                 </dd>
               </div>
@@ -260,6 +347,14 @@ export default function OrderDetailPage() {
               aria-label="Internal notes"
               className="input-hairline resize-y"
             />
+            <button
+              type="button"
+              onClick={() => void saveNotes()}
+              disabled={savingNotes || notes === (order.notes ?? '')}
+              className="btn-ghost-dark mt-2 w-full disabled:opacity-40"
+            >
+              {savingNotes ? 'Saving…' : 'Save notes'}
+            </button>
           </section>
         </div>
       </div>

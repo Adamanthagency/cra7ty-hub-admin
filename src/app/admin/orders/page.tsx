@@ -1,12 +1,13 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageCircle } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { StatusChip, statusLabelFor } from '@/components/admin/status-chip';
-import { orders, orderTotal, orderItemCount } from '@/data/mock/orders';
-import type { OrderStatus } from '@/lib/types';
+import { orders as seed, orderTotal, orderItemCount } from '@/data/mock/orders';
+import { fetchOrders } from '@/lib/orders-api';
+import type { Order, OrderStatus } from '@/lib/types';
 import { formatNgn, formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -29,30 +30,49 @@ function OrdersContent() {
   );
   const [query, setQuery] = useState('');
 
+  // Instant paint from the seed, then hydrate from the real orders table —
+  // the database is the source of truth, the seed only the offline
+  // fallback (same pattern as the Products manager).
+  const [rows, setRows] = useState<Order[]>(seed);
+  useEffect(() => {
+    let live = true;
+    fetchOrders()
+      .then((data) => {
+        if (live) setRows(data);
+      })
+      .catch(() => {
+        // backend unreachable — the seed stays as the honest fallback
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: orders.length };
+    const c: Record<string, number> = { all: rows.length };
     for (const t of TABS) {
-      if (t.key !== 'all') c[t.key] = orders.filter((o) => o.status === t.key).length;
+      if (t.key !== 'all') c[t.key] = rows.filter((o) => o.status === t.key).length;
     }
     return c;
-  }, []);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return orders
+    return rows
       .filter((o) => (tab === 'all' ? true : o.status === tab))
       .filter(
         (o) =>
           !q ||
           o.id.toLowerCase().includes(q) ||
-          o.customerName.toLowerCase().includes(q)
+          o.customerName.toLowerCase().includes(q) ||
+          o.customerPhone.toLowerCase().includes(q)
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [tab, query]);
+  }, [rows, tab, query]);
 
   return (
     <div>
-      <PageHeader title="Orders" subtitle={`${orders.length} total`} />
+      <PageHeader title="Orders" subtitle={`${rows.length} total`} />
 
       {/* Filter bar */}
       <div className="mb-4 space-y-3">
@@ -122,7 +142,21 @@ function OrdersContent() {
                     onClick={() => router.push(`/admin/orders/${order.id}`)}
                     className="cursor-pointer border-b border-line/60 transition-colors last:border-0 hover:bg-paper-12"
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-paper">{order.id}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-paper">
+                      {order.id}
+                      {order.needsReview && (
+                        <span
+                          title={
+                            order.reviewReason
+                              ? `Flagged: ${order.reviewReason.replaceAll('_', ' ')}`
+                              : 'Flagged for manual review'
+                          }
+                          className="ml-2 font-mono text-[10px] uppercase tracking-[0.14em] text-vermilion"
+                        >
+                          ● review
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-paper-70">{order.customerName}</td>
                     <td className="px-4 py-3 text-right font-mono text-xs tabular-nums text-paper-70">
                       {orderItemCount(order)}
@@ -138,6 +172,9 @@ function OrdersContent() {
                         )}
                       >
                         {order.paymentRef}
+                      </span>
+                      <span className="block font-mono text-[10px] uppercase tracking-[0.12em] text-paper-40">
+                        {order.paymentStatus}
                       </span>
                     </td>
                     <td className="px-4 py-3">

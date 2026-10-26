@@ -11,7 +11,7 @@ import { useContent } from '@/components/admin/workbench/content-provider';
 import { MediaImg } from '@/components/admin/media-img';
 import { productCategories } from '@/data/mock/products';
 import { MEDIA_RULES } from '@/data/mock/media';
-import type { MediaItem, ModelKey, Product, ProductVariant, VariantType } from '@/lib/types';
+import type { MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
 import { saveProduct } from '@/lib/catalog-api';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -32,16 +32,6 @@ import { cn } from '@/lib/utils';
  * - The variant grid below shows every variant of the product (with a
  *   type tag); clicking a row selects it and opens the same drawer.
  */
-
-const MODELS: { value: ModelKey; label: string }[] = [
-  { value: 'crane', label: 'Crane' },
-  { value: 'plate', label: 'Plate' },
-  { value: 'spoon', label: 'Spoon' },
-  { value: 'box', label: 'Gift box' },
-  { value: 'flower', label: 'Flower' },
-  { value: 'cup', label: 'Cup' },
-  { value: 'sheet', label: 'Paper sheet' },
-];
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -470,26 +460,10 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                   /products/{product.slug || '…'} — must be unique
                 </p>
               </div>
-              <div>
-                <label
-                  htmlFor="product-model"
-                  className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
-                >
-                  3D model
-                </label>
-                <select
-                  id="product-model"
-                  value={product.model}
-                  onChange={(e) => patch({ model: e.target.value as ModelKey })}
-                  className="input-hairline"
-                >
-                  {MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* The 3D-model select was removed: every product surface
+                  renders photos (ProductMedia), and nothing reads
+                  product.model anymore. The column stays in the DB with a
+                  server-side 'crane' default — see catalog-store. */}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

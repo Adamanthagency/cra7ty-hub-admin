@@ -153,6 +153,9 @@ export const pageSections: PageSection[] = [
     position: 3,
     visible: true,
     variant: 'whatsapp',
+    // Not a layout variant: this flag picks the checkout capability
+    // (WhatsApp-only vs Paystack+WhatsApp). It stores and round-trips, but
+    // renders no difference until the Paystack stage — the next stage.
     variants: ['whatsapp', 'paystack+whatsapp'],
   },
   { id: 'global-consent', page: 'global', key: 'consent', label: 'Replay consent card', position: 4, visible: true },

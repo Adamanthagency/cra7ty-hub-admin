@@ -5,7 +5,7 @@
  */
 
 export interface FieldSpec {
-  type: 'text' | 'longtext' | 'link' | 'number' | 'flag';
+  type: 'text' | 'longtext' | 'link' | 'number' | 'flag' | 'image';
   required: boolean;
   maxLength?: number;
   /** token names this field may contain, e.g. ['shown','total'] */
@@ -76,6 +76,14 @@ export function validateField(
     }
     if (value.startsWith('//') || value.toLowerCase().startsWith('/\\')) {
       return 'That link would leave the site unexpectedly — use /path or https://.';
+    }
+  }
+
+  if (spec.type === 'image') {
+    // Media-library URLs are Storage https URLs; empty means "use the
+    // built-in art" (the required check above still applies when required).
+    if (!value.startsWith('https://')) {
+      return 'Pick an image from the media library (it must be an https:// address).';
     }
   }
 

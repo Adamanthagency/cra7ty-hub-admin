@@ -48,7 +48,11 @@ export interface Product {
   compareAtPrice?: number;
   /** Short mono flag shown on the card, e.g. 'Handfolded'. */
   badge?: string;
-  /** Procedural model shown on the card and detail route. */
+  /** Procedural model shown on the card and detail route.
+   *  DEPRECATED (Tier 2): the editor control was removed — every product
+   *  surface renders photos and nothing reads this. Kept so the DB column
+   *  (NOT NULL, seeded) and the static seed data still typecheck;
+   *  catalog-store defaults it to 'crane' when absent. */
   model: ModelKey;
   /** Pack contents line on the detail route. */
   packCount?: string;
@@ -104,11 +108,20 @@ export interface Order {
   discount?: number;
   status: OrderStatus;
   paymentRef: string;
-  paymentStatus: 'paid' | 'failed';
-  paymentDate: string; // ISO datetime
+  /** Payment axis — written by the checkout confirmation path (webhook /
+   *  verify), never by admin edits. 'pending' = order created, money not
+   *  landed yet; 'refunded' is manual. */
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  paymentDate: string; // ISO datetime ('' when not paid yet)
   notes?: string;
   createdAt: string; // ISO datetime
   updatedAt: string; // ISO datetime
+  /** Buyer email — Paystack's contact + the payment receipt. */
+  customerEmail?: string;
+  /** Paid but flagged by the confirmation path (amount mismatch, stock
+   *  shortfall, coupon race, cancelled-but-paid). Needs a human. */
+  needsReview?: boolean;
+  reviewReason?: string | null;
 }
 
 export type PostStatus = 'draft' | 'published';
@@ -198,7 +211,7 @@ export interface PageSection {
 }
 
 /** Field types shared by scalar fields and list-item fields. */
-export type ContentFieldType = 'text' | 'longtext' | 'link' | 'number' | 'flag';
+export type ContentFieldType = 'text' | 'longtext' | 'link' | 'number' | 'flag' | 'image';
 
 /** A single editable text/number/link value on a section. */
 export interface ContentField {
@@ -295,7 +308,9 @@ export interface Revision {
   changes: RevisionChange[];
 }
 
-/** Storefront category. IDs are fixed — the admin edits text and order. */
+/** Storefront category. Ids are slugs — they ARE the /shop?category=…
+ *  query values, so an id locks once published; name/blurb/order are
+ *  freely editable and rows can be added or removed (Tier 2). */
 export interface Category {
   id: string;
   /** two-digit editorial number, renumbered on reorder */

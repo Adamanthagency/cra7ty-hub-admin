@@ -182,13 +182,30 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>(() => clone(categorySeed));
   const [revisions, setRevisions] = useState<Revision[]>(() => clone(revisionSeed));
   const [media, setMedia] = useState<MediaItem[]>(() => clone(mediaSeed));
-  const [drafts, setDrafts] = useState<DraftState[]>(loadDrafts);
+  // Always empty on the FIRST render — server and client must paint the
+  // same DOM. localStorage does not exist during SSR, so reading it in the
+  // useState initializer made any reload with pending drafts fail hydration
+  // ("Expected server HTML to contain a matching <div>" in DraftBar).
+  // The persisted drafts are restored in the mount effect below.
+  const [drafts, setDrafts] = useState<DraftState[]>(() => []);
   const [liveStatus, setLiveStatus] = useState<LiveStatus>('loading');
   const [liveError, setLiveError] = useState<string | null>(null);
   const [revalidateNotice, setRevalidateNotice] = useState<{
     at: string;
     error: string;
   } | null>(null);
+
+  // Restore persisted drafts right after mount (see the state initializer
+  // above: the first render must be [] on both server and client). Runs in
+  // the same effect phase as the persist effect below, so its debounced
+  // write is always rescheduled with the restored value — it can never
+  // wipe the stored drafts with the initial empty array.
+  useEffect(() => {
+    const stored = loadDrafts();
+    if (stored.length > 0) {
+      setDrafts((prev) => (prev.length > 0 ? prev : stored));
+    }
+  }, []);
 
   // Persist drafts on every change (add, publish-clear, discard-clear all
   // flow through setDrafts, so this one effect covers all three). Debounced
@@ -344,8 +361,9 @@ export function ContentProvider({ children }: { children: ReactNode }) {
     }
 
     // Categories ride the same transaction: the draft's array when one is
-    // pending, otherwise the current live array (apply_publish updates the
-    // fixed-id rows' editable columns and never touches model/count).
+    // pending, otherwise the current live array (apply_publish syncs the
+    // full set — updates editable columns, inserts new ids with the crane
+    // default, deletes removed ids; existing model/count are never written).
     const nextCategories: Category[] = categoryDraft
       ? clone(categoryDraft.after as Category[])
       : clone(categories);

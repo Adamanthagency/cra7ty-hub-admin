@@ -171,7 +171,14 @@ export function validateProduct(input: unknown): { error: string } | { product: 
   ) {
     return { error: 'Compare-at price must be a whole number of naira.' };
   }
-  if (typeof p.model !== 'string' || !MODELS.includes(p.model as ModelKey)) {
+  // The product's 3D-model key is no longer editable (every product
+  // surface renders photos; nothing reads product.model). Validate what
+  // arrives and DEFAULT the column — products.model is NOT NULL.
+  if (
+    p.model !== undefined &&
+    p.model !== null &&
+    (typeof p.model !== 'string' || !MODELS.includes(p.model as ModelKey))
+  ) {
     return { error: `Model must be one of: ${MODELS.join(', ')}.` };
   }
   if (p.status !== 'active' && p.status !== 'inactive') {
@@ -227,7 +234,10 @@ export function validateProduct(input: unknown): { error: string } | { product: 
     description: p.description as string,
     category: p.category as string,
     price: p.price as number,
-    model: p.model as ModelKey,
+    model:
+      typeof p.model === 'string' && MODELS.includes(p.model as ModelKey)
+        ? (p.model as ModelKey)
+        : 'crane',
     detail: p.detail as string[],
     specs: p.specs as ProductSpec[],
     stock: p.stock as number,

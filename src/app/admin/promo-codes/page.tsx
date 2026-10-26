@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Pencil, Copy } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Pencil, Copy, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { SidePanel } from '@/components/admin/side-panel';
 import { StatusChip } from '@/components/admin/status-chip';
 import { promoCodes as seed } from '@/data/mock/promoCodes';
+import {
+  deletePromoCode,
+  fetchPromoCodes,
+  savePromoCode,
+} from '@/lib/orders-api';
 import type { DiscountType, PromoCode } from '@/lib/types';
 import { formatShortDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -23,11 +28,15 @@ function generateCode(): string {
 function deriveStatus(code: PromoCode): 'active' | 'expired' | 'inactive' {
   if (!code.active) return 'inactive';
   const today = new Date().toISOString().slice(0, 10);
-  if (code.expiresAt < today) return 'expired';
+  // an empty expiry means "never expires"
+  if (code.expiresAt && code.expiresAt < today) return 'expired';
   return 'active';
 }
 
 interface DraftState {
+  /** set when editing — the save then PATCHes this row instead of
+   *  creating a duplicate */
+  id?: string;
   code: string;
   type: DiscountType;
   value: string;
@@ -48,17 +57,29 @@ const emptyDraft: DraftState = {
 };
 
 export default function PromoCodesPage() {
+  // Seed paints instantly; the coupon_codes table is the source of truth
+  // (usage counts there are owned by the payment flow, never the client).
   const [codes, setCodes] = useState<PromoCode[]>(seed);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DraftState>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const refresh = () => {
+    fetchPromoCodes()
+      .then(setCodes)
+      .catch(() => {
+        // offline — the last painted list stays
+      });
+  };
+  useEffect(refresh, []);
 
   const activeCount = codes.filter((c) => deriveStatus(c) === 'active').length;
 
   const patch = (partial: Partial<DraftState>) =>
     setDraft((prev) => ({ ...prev, ...partial }));
 
-  const save = () => {
+  const save = async () => {
     const code = draft.code.trim().toUpperCase();
     const value = Number(draft.value);
     if (!code) return setError('Code is required.');
@@ -66,13 +87,18 @@ export default function PromoCodesPage() {
       return setError('Enter a discount value.');
     if (draft.type === 'percentage' && value > 100)
       return setError('Percentage cannot exceed 100.');
-    if (!draft.expiresAt) return setError('Expiry date is required.');
-    if (codes.some((c) => c.code === code))
+    if (
+      !draft.id &&
+      codes.some((c) => c.code === code)
+    )
       return setError('That code already exists.');
 
-    setCodes((prev) => [
-      {
-        id: `pc-${code.toLowerCase()}`,
+    setSaving(true);
+    setError(null);
+    try {
+      await savePromoCode({
+        // coupon_codes.id is a uuid column — new codes get a plain UUID
+        id: draft.id ?? crypto.randomUUID(),
         code,
         type: draft.type,
         value,
@@ -81,12 +107,25 @@ export default function PromoCodesPage() {
         expiresAt: draft.expiresAt,
         minOrderAmount: draft.minOrderAmount ? Number(draft.minOrderAmount) : undefined,
         active: draft.active,
-      },
-      ...prev,
-    ]);
-    setDraft(emptyDraft);
-    setError(null);
-    setOpen(false);
+      });
+      refresh(); // the server's row (real id, real usage count) wins
+      setDraft(emptyDraft);
+      setOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (code: PromoCode) => {
+    if (!window.confirm(`Delete ${code.code}? This cannot be undone.`)) return;
+    try {
+      await deletePromoCode(code.id);
+      refresh();
+    } catch (e) {
+      window.alert((e as Error).message);
+    }
   };
 
   return (
@@ -95,7 +134,15 @@ export default function PromoCodesPage() {
         title="Promo codes"
         subtitle={`${activeCount} active`}
         right={
-          <button type="button" onClick={() => setOpen(true)} className="btn-vermilion">
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(emptyDraft);
+              setError(null);
+              setOpen(true);
+            }}
+            className="btn-vermilion"
+          >
             <Plus size={15} aria-hidden />
             New code
           </button>
@@ -137,7 +184,7 @@ export default function PromoCodesPage() {
                       {c.usageLimit !== undefined ? ` / ${c.usageLimit}` : ''}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-paper-60">
-                      {formatShortDate(c.expiresAt)}
+                      {c.expiresAt ? formatShortDate(c.expiresAt) : 'Never'}
                     </td>
                     <td className="px-4 py-3">
                       <StatusChip status={status} />
@@ -157,6 +204,7 @@ export default function PromoCodesPage() {
                           aria-label={`Edit ${c.code}`}
                           onClick={() => {
                             setDraft({
+                              id: c.id,
                               code: c.code,
                               type: c.type,
                               value: String(c.value),
@@ -173,6 +221,14 @@ export default function PromoCodesPage() {
                         >
                           <Pencil size={14} />
                         </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${c.code}`}
+                          onClick={() => void remove(c)}
+                          className="rounded-card p-2 text-paper-60 hover:bg-paper-12 hover:text-vermilion"
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </span>
                     </td>
                   </tr>
@@ -187,8 +243,8 @@ export default function PromoCodesPage() {
       <SidePanel
         open={open}
         onOpenChange={setOpen}
-        title="New promo code"
-        description="Local state only — no backend"
+        title={draft.id ? 'Edit promo code' : 'New promo code'}
+        description="Codes are validated by shoppers' checkouts server-side — usage counts update as payments land."
       >
         <div className="space-y-5">
           {/* Code + generate */}
@@ -292,7 +348,7 @@ export default function PromoCodesPage() {
               htmlFor="promo-expiry"
               className="mb-1.5 block font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60"
             >
-              Expiry date
+              Expiry date (optional — empty means never expires)
             </label>
             <input
               id="promo-expiry"
@@ -353,8 +409,13 @@ export default function PromoCodesPage() {
             </p>
           )}
 
-          <button type="button" onClick={save} className="btn-vermilion w-full">
-            Save code
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving}
+            className="btn-vermilion w-full disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save code'}
           </button>
         </div>
       </SidePanel>

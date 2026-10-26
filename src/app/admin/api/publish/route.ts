@@ -45,8 +45,9 @@ export async function POST(request: NextRequest) {
   }
   if (!Array.isArray(sections)) return badRequest('`sections` must be an array.');
   if (!Array.isArray(categories)) {
-    return badRequest('`categories` must be an array (the six fixed categories).');
+    return badRequest('`categories` must be an array of category rows.');
   }
+  const seenCategoryIds = new Set<string>();
   for (const category of categories) {
     if (
       typeof category?.id !== 'string' ||
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest) {
     ) {
       return badRequest('Every category needs id, index, name and blurb strings.');
     }
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(category.id)) {
+      return badRequest(
+        `Category id "${category.id}" must be a slug (lowercase letters, digits and dashes) — it is the /shop?category=… value.`,
+      );
+    }
+    if (seenCategoryIds.has(category.id)) {
+      return badRequest(`Duplicate category id "${category.id}" — every category needs a unique id.`);
+    }
+    seenCategoryIds.add(category.id);
   }
   if (
     !settings ||

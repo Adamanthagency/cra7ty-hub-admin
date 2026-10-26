@@ -1,26 +1,18 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Info, Plus, PenLine, Ticket } from 'lucide-react';
+import { ArrowRight, Plus, PenLine, Ticket } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { MonoStat } from '@/components/admin/mono-stat';
 import { StatusChip } from '@/components/admin/status-chip';
-import { orders, orderTotal, orderItemCount } from '@/data/mock/orders';
-import { products } from '@/data/mock/products';
+import { orders as seedOrders, orderTotal, orderItemCount } from '@/data/mock/orders';
+import { products as seedProducts } from '@/data/mock/products';
+import { fetchOrders } from '@/lib/orders-api';
+import { fetchProducts } from '@/lib/catalog-api';
+import type { Order, Product } from '@/lib/types';
 import { formatNgn, formatShortDate } from '@/lib/format';
-
-/** Last month's figures — stand-in comparators until the backend lands. */
-const LAST_MONTH = { orders: 7, revenue: 148500 };
-
-/** Marks any figure below as sample data — none of it is real orders. */
-function DemoChip() {
-  return (
-    <span className="rounded-card border border-dashed border-kraft-30 bg-kraft-12 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-kraft">
-      Demo data
-    </span>
-  );
-}
 
 const quickActions = [
   { label: 'Add product', href: '/admin/products/new', icon: Plus },
@@ -31,52 +23,77 @@ const quickActions = [
 export default function DashboardPage() {
   const router = useRouter();
 
-  const thisMonthOrders = orders.filter((o) => o.createdAt.startsWith('2026-10'));
+  // Seeds paint instantly; the database is the source of truth (same
+  // pattern as Products/Orders). Deltas compare against the previous
+  // month of REAL orders — no hardcoded comparators.
+  const [orders, setOrders] = useState<Order[]>(seedOrders);
+  const [products, setProducts] = useState<Product[]>(seedProducts);
+  useEffect(() => {
+    let live = true;
+    fetchOrders()
+      .then((data) => {
+        if (live) setOrders(data);
+      })
+      .catch(() => {
+        // offline — the seed stays as the fallback
+      });
+    fetchProducts()
+      .then((data) => {
+        if (live) setProducts(data);
+      })
+      .catch(() => {
+        // offline — the seed stays as the fallback
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const lastMonthKey = new Date(Date.now() - 30 * 86_400_000)
+    .toISOString()
+    .slice(0, 7);
+
+  const thisMonthOrders = orders.filter((o) => o.createdAt.startsWith(monthKey));
+  const lastMonthOrders = orders.filter((o) => o.createdAt.startsWith(lastMonthKey));
   const revenue = thisMonthOrders
     .filter((o) => o.paymentStatus === 'paid')
     .reduce((sum, o) => sum + orderTotal(o), 0);
-  const ordersDelta = Math.round(
-    ((thisMonthOrders.length - LAST_MONTH.orders) / LAST_MONTH.orders) * 100
-  );
-  const revenueDelta = Math.round(
-    ((revenue - LAST_MONTH.revenue) / LAST_MONTH.revenue) * 100
-  );
+  const lastRevenue = lastMonthOrders
+    .filter((o) => o.paymentStatus === 'paid')
+    .reduce((sum, o) => sum + orderTotal(o), 0);
+  const pctDelta = (now: number, before: number): number | undefined =>
+    before === 0 ? undefined : Math.round(((now - before) / before) * 100);
 
   const pendingCount = orders.filter((o) => o.status === 'pending').length;
+  const reviewCount = orders.filter((o) => o.needsReview).length;
   const lowStock = products.filter((p) => p.stock < 5);
   const recent = [...orders]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 5);
 
+  const today = new Date().toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle="Tuesday, 22 October 2026" />
-
-      {/* Every number on this page is mock data until checkout is live;
-          the label makes sure none of it reads as real revenue */}
-      <p
-        role="note"
-        className="mb-5 flex items-center gap-2 rounded-card border border-dashed border-kraft-30 bg-kraft-12 px-4 py-3"
-      >
-        <Info size={14} aria-hidden className="shrink-0 text-kraft" />
-        <span className="font-mono text-[11px] leading-relaxed text-kraft">
-          <span className="uppercase tracking-[0.16em]">Demo data</span> —
-          orders, revenue and stock figures below are samples until checkout
-          is live.
-        </span>
-      </p>
+      <PageHeader title="Dashboard" subtitle={today} />
 
       {/* Stat tiles */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MonoStat
           label="Orders this month"
           value={String(thisMonthOrders.length)}
-          delta={ordersDelta}
+          delta={pctDelta(thisMonthOrders.length, lastMonthOrders.length)}
         />
         <MonoStat
           label="Revenue this month"
           value={formatNgn(revenue)}
-          delta={revenueDelta}
+          delta={pctDelta(revenue, lastRevenue)}
         />
         <MonoStat
           label="Pending orders"
@@ -90,13 +107,32 @@ export default function DashboardPage() {
         />
       </div>
 
+      {reviewCount > 0 && (
+        <p
+          role="note"
+          className="mt-4 flex items-center gap-2 rounded-card border border-vermilion/60 bg-vermilion/10 px-4 py-3"
+        >
+          <span className="font-mono text-[11px] leading-relaxed text-vermilion">
+            <span className="uppercase tracking-[0.16em]">Needs review</span> —
+            {' '}{reviewCount} paid{' '}{reviewCount === 1 ? 'order was' : 'orders were'}{' '}
+            flagged by the payment confirmation flow (amount mismatch, stock
+            shortfall or a cancelled order that still got paid).
+          </span>
+          <Link
+            href="/admin/orders"
+            className="ml-auto shrink-0 font-mono text-[11px] text-vermilion underline underline-offset-4"
+          >
+            Review →
+          </Link>
+        </p>
+      )}
+
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Recent orders */}
         <section className="card-admin overflow-hidden lg:col-span-2">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 className="flex items-center gap-2 text-sm font-medium text-paper">
               Recent orders
-              <DemoChip />
             </h2>
             <Link
               href="/admin/orders"
@@ -171,7 +207,6 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <h2 className="flex items-center gap-2 text-sm font-medium text-paper">
                 Low stock alert
-                <DemoChip />
               </h2>
               <span className="font-mono text-[11px] text-vermilion">
                 {lowStock.length}
