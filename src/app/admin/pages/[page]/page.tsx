@@ -22,7 +22,8 @@ import { useState } from 'react';
 export default function PageSectionsPage() {
   const params = useParams<{ page: string }>();
   const page = pages.find((p) => p.key === params.page);
-  const { sections, draftsForPage, setSection, moveSection } = useContent();
+  const { sections, drafts, draftsForPage, setSection, moveSection, addDraft } =
+    useContent();
   const [editing, setEditing] = useState<PageSection | null>(null);
 
   if (!page) notFound();
@@ -65,6 +66,12 @@ export default function PageSectionsPage() {
         {list.map((section, index) => {
           const shared = section.sharedFrom !== undefined;
           const dimmed = !section.visible;
+          // pending layout draft overlay, so the chip shows the UNPUBLISHED
+          // choice until Publish lands it (same overlay the visual editor
+          // applies)
+          const pendingVariant = drafts.find(
+            (d) => d.type === 'section' && d.key === section.id
+          );
           return (
             <li
               key={section.id}
@@ -93,13 +100,34 @@ export default function PageSectionsPage() {
                 )}
               </div>
 
-              {/* variant chips — only where variants exist and not shared */}
+              {/* variant chips — only where variants exist and not shared.
+                  Records a `section` draft (the same shape SectionForm and
+                  the visual editor save), so the DraftBar appears with a
+                  Publish button. The old handler only mutated local state:
+                  no draft was recorded, the bar never appeared and the
+                  choice silently died on reload. */}
               {section.variants && section.variants.length > 0 && !shared && (
                 <div className="shrink-0">
                   <VariantChips
                     options={section.variants}
-                    value={section.variant}
-                    onChange={(v) => setSection(section.id, { variant: v })}
+                    value={
+                      pendingVariant
+                        ? ((pendingVariant.after as { variant?: string })
+                            .variant ?? section.variant)
+                        : section.variant
+                    }
+                    onChange={(v) =>
+                      addDraft({
+                        type: 'section',
+                        key: section.id,
+                        label: `${section.label} — layout`,
+                        page: page.key,
+                        before: { variant: section.variant },
+                        // only the changed field — a full snapshot would
+                        // clobber live visible/position on overlay
+                        after: { variant: v },
+                      })
+                    }
                     label="Layout"
                   />
                 </div>
