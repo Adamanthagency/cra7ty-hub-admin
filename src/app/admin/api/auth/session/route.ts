@@ -30,7 +30,19 @@ export async function POST(request: NextRequest) {
   }
 
   const user = await verifyAccessToken(access_token);
-  if (!user) {
+  if (!user.ok) {
+    // A genuine rejection means the link/token is dead; an unreachable
+    // GoTrue is a transient outage, not an invalid link — say so honestly
+    // instead of blaming the link.
+    if (user.reason === 'unreachable') {
+      return NextResponse.json(
+        {
+          error:
+            "Can't verify the link right now — the auth service is unreachable. Please try again in a moment.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: 'Link is no longer valid.' }, { status: 401 });
   }
 

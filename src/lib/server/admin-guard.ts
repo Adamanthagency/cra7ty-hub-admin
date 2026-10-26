@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE,
   SESSION_COOKIE_OPTS,
   resolveSession,
+  serviceUnavailable,
   type AdminSession,
 } from './admin-auth';
 
@@ -25,9 +26,14 @@ export async function requireAdmin(
   request: NextRequest,
 ): Promise<AdminSession | NextResponse> {
   const raw = request.cookies.get(SESSION_COOKIE)?.value;
-  const { session, updated } = await resolveSession(raw);
+  const { session, updated, error } = await resolveSession(raw);
 
   if (!session) {
+    // A genuine rejection is a 401 (the caller is logged out). An
+    // unreachable GoTrue is NOT a logout — surface a 503 so the client can
+    // retry instead of destroying a session that may still be perfectly
+    // valid.
+    if (error === 'unreachable') return serviceUnavailable();
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
   }
 
