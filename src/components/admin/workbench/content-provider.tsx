@@ -302,9 +302,31 @@ export function ContentProvider({ children }: { children: ReactNode }) {
         const target = nextSections.find((s) => s.id === d.key);
         if (target) Object.assign(target, d.after as Partial<PageSection>);
       } else if (d.type === 'settings') {
-        const patch = d.after as Partial<SiteSettings>;
-        Object.assign(nextSettings, patch);
-        if (patch.seo) nextSettings.seo = { ...nextSettings.seo, ...patch.seo };
+        // Settings drafts are ONE SCALAR PER PATH (settings.whatsappNumber,
+        // settings.seo.home.title — the Settings manager emits `after` as
+        // the value itself). The old Object.assign(nextSettings, after)
+        // treated a string as a patch and copied its CHARACTER INDICES,
+        // so scalar settings edits recorded a revision but never landed —
+        // apply_publish faithfully reinserted the previous value. Apply by
+        // path instead: scalar keys directly, seo.* under seo[page].
+        const path = d.key.startsWith('settings.')
+          ? d.key.slice('settings.'.length)
+          : '';
+        const seoMatch = /^seo\.([^.]+)\.(title|description)$/.exec(path);
+        if (seoMatch) {
+          const pageKey = seoMatch[1] as PageKey;
+          const field = seoMatch[2] as 'title' | 'description';
+          const current = nextSettings.seo[pageKey] ?? {
+            title: '',
+            description: '',
+          };
+          nextSettings.seo[pageKey] = {
+            ...current,
+            [field]: typeof d.after === 'string' || typeof d.after === 'number' ? d.after : current[field],
+          };
+        } else if (path) {
+          (nextSettings as unknown as Record<string, unknown>)[path] = d.after;
+        }
       } else if (d.type === 'category') {
         categoryDraft = d;
       }
