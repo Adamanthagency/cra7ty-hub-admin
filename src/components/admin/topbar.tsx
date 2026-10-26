@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Bell, Menu } from 'lucide-react';
+import { Bell, LogOut, Menu } from 'lucide-react';
 import { navItems } from './nav';
 
 const detailTitles = (pathname: string): string | null => {
@@ -16,6 +17,32 @@ const detailTitles = (pathname: string): string | null => {
 
 export function Topbar({ onOpenMobile }: { onOpenMobile: () => void }) {
   const pathname = usePathname();
+  const [email, setEmail] = useState<string | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetch('/admin/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { email?: string } | null) => {
+        if (alive && data?.email) setEmail(data.email);
+      })
+      .catch(() => null);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function onSignOut() {
+    setSigningOut(true);
+    try {
+      await fetch('/admin/api/auth/logout', { method: 'POST' });
+    } finally {
+      window.location.replace('/admin/login');
+    }
+  }
+
+  const initials = email ? email.slice(0, 2).toUpperCase() : '··';
 
   const fromNav = navItems.find(
     (item) => pathname === item.href || pathname.startsWith(item.href + '/')
@@ -59,12 +86,22 @@ export function Topbar({ onOpenMobile }: { onOpenMobile: () => void }) {
             aria-hidden
             className="flex h-6 w-6 items-center justify-center rounded-full bg-kraft font-mono text-[10px] font-medium text-ink"
           >
-            CH
+            {initials}
           </span>
           <span className="hidden font-mono text-xs text-paper-60 sm:inline">
-            admin@cra7tyhub.ng
+            {email ?? '…'}
           </span>
         </div>
+        <button
+          type="button"
+          onClick={onSignOut}
+          disabled={signingOut}
+          aria-label="Sign out"
+          className="flex h-9 items-center gap-1.5 rounded-[4px] border border-line px-2.5 font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60 transition-colors hover:border-vermilion hover:text-vermilion disabled:opacity-50"
+        >
+          <LogOut size={13} aria-hidden />
+          Sign out
+        </button>
       </div>
     </header>
   );
