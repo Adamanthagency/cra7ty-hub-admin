@@ -90,6 +90,13 @@ interface ContentContextValue {
    * locally. Throws on failure — drafts stay, nothing goes live.
    */
   publish: () => Promise<Revision & { revalidate?: RevalidateStatus }>;
+  /**
+   * A publish whose DB write succeeded but whose live-site refresh failed
+   * — kept until dismissed or the next successful refresh, so a silent
+   * staleness never goes unnoticed. Distinct from a publish failure.
+   */
+  revalidateNotice: { at: string; error: string } | null;
+  dismissRevalidateNotice: () => void;
 
   /* live-state mutators used after publish / by restore */
   setSection: (id: string, patch: Partial<PageSection>) => void;
@@ -178,6 +185,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const [drafts, setDrafts] = useState<DraftState[]>(loadDrafts);
   const [liveStatus, setLiveStatus] = useState<LiveStatus>('loading');
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [revalidateNotice, setRevalidateNotice] = useState<{
+    at: string;
+    error: string;
+  } | null>(null);
 
   // Persist drafts on every change (add, publish-clear, discard-clear all
   // flow through setDrafts, so this one effect covers all three). Debounced
@@ -357,7 +368,19 @@ export function ContentProvider({ children }: { children: ReactNode }) {
     setCategories(nextCategories);
     setRevisions((prev) => [rev, ...prev]);
     setDrafts([]);
-    return { ...rev, revalidate: published.revalidate };
+    // The DB write succeeded; if the live-site refresh did not, keep a
+    // persistent notice so a silent staleness is visible — and clear any
+    // prior one when this refresh succeeded.
+    const rv = published.revalidate;
+    if (rv && !rv.ok) {
+      setRevalidateNotice({
+        at: new Date().toISOString(),
+        error: rv.error ?? 'unknown error',
+      });
+    } else if (rv?.ok) {
+      setRevalidateNotice(null);
+    }
+    return { ...rev, revalidate: rv };
   }, [drafts, values, lists, sections, settings, categories]);
 
   const setSection = useCallback((id: string, patch: Partial<PageSection>) => {
@@ -400,6 +423,10 @@ export function ContentProvider({ children }: { children: ReactNode }) {
 
   const addRevision = useCallback((rev: Revision) => {
     setRevisions((prev) => [rev, ...prev]);
+  }, []);
+
+  const dismissRevalidateNotice = useCallback(() => {
+    setRevalidateNotice(null);
   }, []);
 
   // Server first, state second: the API call must succeed before the
@@ -539,6 +566,8 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       applyCategories,
       addRevision,
       restoreRevision,
+      revalidateNotice,
+      dismissRevalidateNotice,
     }),
     [
       values,
@@ -566,6 +595,8 @@ export function ContentProvider({ children }: { children: ReactNode }) {
       applyCategories,
       addRevision,
       restoreRevision,
+      revalidateNotice,
+      dismissRevalidateNotice,
     ]
   );
 

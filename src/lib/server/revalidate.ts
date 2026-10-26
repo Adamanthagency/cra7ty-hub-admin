@@ -26,6 +26,24 @@ export interface RevalidateInput {
 }
 
 /**
+ * Structured server-side trace for a failed revalidation — enough to
+ * diagnose which call failed and why (target, paths, tags, timestamp),
+ * without ever logging the secret or its value.
+ */
+function logRevalidateFailure(
+  reason: string,
+  input: RevalidateInput,
+  base: string | undefined,
+): void {
+  console.error(
+    `[revalidate] FAILED ${new Date().toISOString()} — ${reason}` +
+      ` | target=${base ?? '(unset)'}` +
+      ` | paths=${input.paths?.join(',') || '[]'}` +
+      ` | tags=${input.tags?.join(',') || '[]'}`,
+  );
+}
+
+/**
  * Ask the storefront to revalidate the given paths and tags. Never
  * throws — the result always says whether the live site was refreshed
  * and how long it took, so routes can attach it to an otherwise
@@ -37,10 +55,14 @@ export async function revalidateStorefront(
   const base = process.env.STOREFRONT_URL;
   const secret = process.env.REVALIDATE_SECRET;
   if (!base) {
-    return { ok: false, ms: 0, error: 'STOREFRONT_URL is not set on this server' };
+    const error = 'STOREFRONT_URL is not set on this server';
+    logRevalidateFailure(error, input, base);
+    return { ok: false, ms: 0, error };
   }
   if (!secret) {
-    return { ok: false, ms: 0, error: 'REVALIDATE_SECRET is not set on this server' };
+    const error = 'REVALIDATE_SECRET is not set on this server';
+    logRevalidateFailure(error, input, base);
+    return { ok: false, ms: 0, error };
   }
 
   const started = Date.now();
@@ -58,14 +80,14 @@ export async function revalidateStorefront(
     const ms = Date.now() - started;
     if (!response.ok) {
       const detail = (await response.text().catch(() => '')).slice(0, 300);
-      return {
-        ok: false,
-        ms,
-        error: `storefront answered HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
-      };
+      const error = `storefront answered HTTP ${response.status}${detail ? `: ${detail}` : ''}`;
+      logRevalidateFailure(error, input, base);
+      return { ok: false, ms, error };
     }
     return { ok: true, ms };
   } catch (error) {
-    return { ok: false, ms: Date.now() - started, error: (error as Error).message };
+    const message = (error as Error).message;
+    logRevalidateFailure(message, input, base);
+    return { ok: false, ms: Date.now() - started, error: message };
   }
 }

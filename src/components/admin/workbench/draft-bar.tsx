@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Eye, Trash2, Upload } from 'lucide-react';
+import { Eye, Trash2, Upload, X } from 'lucide-react';
 import { useContent } from './content-provider';
 import { ConfirmDialog } from './confirm-dialog';
 import { usePathname } from 'next/navigation';
@@ -17,7 +17,15 @@ import { usePathname } from 'next/navigation';
  * never writes. Preview is a UI placeholder until the backend lands.
  */
 export function DraftBar() {
-  const { drafts, discardAll, publish, liveStatus, liveError } = useContent();
+  const {
+    drafts,
+    discardAll,
+    publish,
+    liveStatus,
+    liveError,
+    revalidateNotice,
+    dismissRevalidateNotice,
+  } = useContent();
   const pathname = usePathname();
   const [confirm, setConfirm] = useState<'discard' | 'publish' | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,7 +61,7 @@ export function DraftBar() {
 
   const offline = liveStatus === 'offline';
 
-  if (!note && drafts.length === 0 && !offline) return null;
+  if (!note && drafts.length === 0 && !offline && !revalidateNotice) return null;
 
   return (
     <>
@@ -71,6 +79,32 @@ export function DraftBar() {
               Not connected to Supabase — edits stay on this device and
               Publish will fail. {liveError ?? ''}
             </p>
+          )}
+
+          {/* Persistent, dismissible: the DB write succeeded but the
+              live-site refresh did not — visible until dismissed or the
+              next successful refresh, so a silent staleness is noticed. */}
+          {revalidateNotice && (
+            <div
+              role="alert"
+              className="mb-2 flex items-start justify-between gap-3 rounded-card border border-vermilion/40 bg-vermilion-20 px-3 py-2 font-mono text-[11px] text-vermilion"
+            >
+              <p>
+                Last publish went to the database, but refreshing the live
+                site failed at{' '}
+                {new Date(revalidateNotice.at).toLocaleTimeString()} —{' '}
+                {revalidateNotice.error}. The storefront will catch up within
+                about 5 minutes.
+              </p>
+              <button
+                type="button"
+                onClick={dismissRevalidateNotice}
+                aria-label="Dismiss live-refresh warning"
+                className="shrink-0 rounded text-vermilion hover:bg-vermilion/10"
+              >
+                <X size={14} />
+              </button>
+            </div>
           )}
 
           {note && <PublishedNote note={note} />}
