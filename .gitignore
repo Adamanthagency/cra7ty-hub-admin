@@ -40,3 +40,14 @@ next-env.d.ts
 
 # logs
 *.log
+
+# local E2E harness: the .mjs scripts ARE tracked (they are this project's
+# only regression net), but the runtime artifacts they leave behind are not.
+# .verify/.bypass holds a live Vercel deployment-protection bypass token --
+# it must NEVER be committed. The logs, screenshots, response bodies and
+# e2e-live-state.json are regenerated on every run and are git noise.
+.verify/.bypass
+.verify/*.log
+.verify/*.png
+.verify/*.txt
+.verify/*.json
