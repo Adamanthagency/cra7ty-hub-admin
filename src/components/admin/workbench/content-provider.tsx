@@ -115,6 +115,50 @@ const nextId = (prefix: string) => `${prefix}-${Date.now()}-${++uid}`;
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
+/**
+ * Drafts are also persisted to localStorage so a reload (or a crash)
+ * does not silently discard in-progress edits. Versioned so a future
+ * DraftState shape change can invalidate old entries instead of
+ * restoring garbage. Storage is best-effort: when unavailable or
+ * blocked (private mode, quota), the admin keeps working from memory
+ * exactly as before — persistence only ever ADDS resilience.
+ */
+const DRAFTS_STORAGE_KEY = 'cra7ty.drafts.v1';
+
+/** Read + validate drafts from localStorage. Never throws; [] when unusable. */
+function loadDrafts(): DraftState[] {
+  try {
+    const raw = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // A draft needs at least the fields the workbench reads on render.
+    return parsed.filter(
+      (d): d is DraftState =>
+        typeof d === 'object' &&
+        d !== null &&
+        typeof (d as DraftState).id === 'string' &&
+        typeof (d as DraftState).key === 'string' &&
+        typeof (d as DraftState).label === 'string' &&
+        ['field', 'list', 'section', 'settings', 'category'].includes(
+          (d as DraftState).type
+        )
+    );
+  } catch {
+    // blocked storage, malformed JSON, or a non-serialisable value — start clean
+    return [];
+  }
+}
+
+/** Best-effort persist; a blocked/full localStorage is not an error. */
+function saveDrafts(drafts: DraftState[]): void {
+  try {
+    window.localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+  } catch {
+    // ignore — drafts still live in memory for this session
+  }
+}
+
 export function ContentProvider({ children }: { children: ReactNode }) {
   // Local seeds paint the first frame and keep the workbench usable when
   // the API is unreachable; hydration replaces them with live data.
@@ -131,9 +175,17 @@ export function ContentProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories] = useState<Category[]>(() => clone(categorySeed));
   const [revisions, setRevisions] = useState<Revision[]>(() => clone(revisionSeed));
   const [media, setMedia] = useState<MediaItem[]>(() => clone(mediaSeed));
-  const [drafts, setDrafts] = useState<DraftState[]>([]);
+  const [drafts, setDrafts] = useState<DraftState[]>(loadDrafts);
   const [liveStatus, setLiveStatus] = useState<LiveStatus>('loading');
   const [liveError, setLiveError] = useState<string | null>(null);
+
+  // Persist drafts on every change (add, publish-clear, discard-clear all
+  // flow through setDrafts, so this one effect covers all three). Debounced
+  // so rapid edits don't thrash the synchronous localStorage write.
+  useEffect(() => {
+    const t = setTimeout(() => saveDrafts(drafts), 200);
+    return () => clearTimeout(t);
+  }, [drafts]);
 
   // Hydrate from Supabase once on mount. A failure is not fatal — the
   // seed stays, liveStatus says so, and publish will report its own error.
