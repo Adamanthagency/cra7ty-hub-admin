@@ -57,6 +57,9 @@ interface ProductRow {
   specs: ProductSpec[];
   status: string;
   stock: number;
+  product_type: string;
+  download_path: string | null;
+  download_filename: string | null;
   variants: Product['variants'];
   tags: string[];
   images: string[];
@@ -87,7 +90,7 @@ interface PostRow {
 }
 
 const PRODUCT_COLUMNS =
-  'id,position,slug,name,category,price,compare_at_price,description,badge,model,pack_count,size,detail,specs,status,stock,variants,tags,images,seo,updated_at';
+  'id,position,slug,name,category,price,compare_at_price,description,badge,model,pack_count,size,detail,specs,status,stock,product_type,download_path,download_filename,variants,tags,images,seo,updated_at';
 const POST_COLUMNS =
   'id,position,slug,title,title_lines,standfirst,excerpt,date,minutes,category,model,body,related_product_ids,placeholder,status,tags,cover_url,published_at,updated_at';
 
@@ -112,6 +115,9 @@ function toProduct(row: ProductRow): Product {
     specs: row.specs ?? [],
     stock: row.stock ?? 0,
     status: row.status === 'inactive' ? 'inactive' : 'active',
+    productType: row.product_type === 'digital' ? 'digital' : 'physical',
+    ...(row.download_path ? { downloadPath: row.download_path } : {}),
+    ...(row.download_filename ? { downloadFilename: row.download_filename } : {}),
     variants: row.variants ?? [],
     tags: row.tags ?? [],
     images: row.images ?? [],
@@ -187,6 +193,65 @@ export function validateProduct(input: unknown): { error: string } | { product: 
   if (typeof p.stock !== 'number' || !Number.isInteger(p.stock) || p.stock < 0) {
     return { error: 'Stock must be zero or more.' };
   }
+  // ── Tier 5: digital delivery ──────────────────────────────────────
+  // product_type defaults to 'physical' at the column level, so an
+  // absent value is legitimate for every row that predates this tier.
+  const productType = p.productType === undefined || p.productType === null
+    ? 'physical'
+    : p.productType;
+  if (productType !== 'physical' && productType !== 'digital') {
+    return { error: 'Product type must be physical or digital.' };
+  }
+  const downloadPath =
+    typeof p.downloadPath === 'string' && p.downloadPath.trim() !== ''
+      ? p.downloadPath.trim()
+      : undefined;
+  const downloadFilename =
+    typeof p.downloadFilename === 'string' && p.downloadFilename.trim() !== ''
+      ? p.downloadFilename.trim()
+      : undefined;
+  if (downloadPath !== undefined) {
+    // Same shape rule the storage layer enforces: a bucket-relative
+    // path, no leading slash, no traversal. A malformed path here would
+    // be minted into a signed URL later and fail at download time, so
+    // it is rejected at save time instead.
+    if (
+      downloadPath.length > 300 ||
+      downloadPath.startsWith('/') ||
+      downloadPath.includes('..') ||
+      downloadPath.includes('\\') ||
+      downloadPath.includes('\0') ||
+      downloadPath.split('/').some((segment) => segment === '')
+    ) {
+      return { error: 'The download file path is not a valid storage path.' };
+    }
+  }
+  if (downloadFilename !== undefined && downloadFilename.length > 200) {
+    return { error: 'The download filename is too long (200 max).' };
+  }
+  if (downloadPath === undefined && downloadFilename !== undefined) {
+    return { error: 'A download filename needs the file it belongs to.' };
+  }
+  // Mirror of the photo rule: an ACTIVE digital product with no file
+  // would sell nothing — checkout would confirm, the grant insert would
+  // find no path, and the buyer would get an email with no links.
+  // Drafts are exempt so work-in-progress can be saved.
+  if (
+    productType === 'digital' &&
+    p.status === 'active' &&
+    downloadPath === undefined
+  ) {
+    return {
+      error:
+        'Publishing a digital product needs its file — upload one below (Save draft works without it).',
+    };
+  }
+  if (productType === 'physical' && downloadPath !== undefined) {
+    return {
+      error:
+        'Only a digital product can carry a download file — switch the type or clear the file.',
+    };
+  }
   if (!isStrArray(p.detail, 40, 2000)) return { error: 'Detail must be up to 40 paragraphs.' };
   if (!Array.isArray(p.specs) || p.specs.length > 30) return { error: 'Specs must be up to 30 rows.' };
   for (const spec of p.specs as unknown[]) {
@@ -242,6 +307,9 @@ export function validateProduct(input: unknown): { error: string } | { product: 
     specs: p.specs as ProductSpec[],
     stock: p.stock as number,
     status: p.status as Product['status'],
+    productType: productType as Product['productType'],
+    ...(downloadPath ? { downloadPath } : {}),
+    ...(downloadFilename ? { downloadFilename } : {}),
     variants: p.variants as Product['variants'],
     tags: p.tags as string[],
     images: p.images as string[],
@@ -394,6 +462,13 @@ export async function saveProduct(product: Product): Promise<void> {
       .filter((s) => s.label !== '' || s.value !== ''),
     status: product.status,
     stock: product.stock,
+    // Written explicitly (not conditionally) so switching a product
+    // from digital back to physical CLEARS the file instead of leaving
+    // an orphan path that no longer means anything.
+    product_type: product.productType === 'digital' ? 'digital' : 'physical',
+    download_path: product.productType === 'digital' ? (product.downloadPath ?? null) : null,
+    download_filename:
+      product.productType === 'digital' ? (product.downloadFilename ?? null) : null,
     variants: product.variants,
     tags: product.tags,
     images: product.images,

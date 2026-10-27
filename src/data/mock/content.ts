@@ -112,7 +112,7 @@ const globalLists: ContentList[] = [
       { id: 'nav-bulk', fields: { label: 'Bulk Orders', href: '/#bulk' } },
       { id: 'nav-blog', fields: { label: 'Blog', href: '/blog' } },
       { id: 'nav-about', fields: { label: 'About', href: '/about' } },
-      { id: 'nav-tracker', fields: { label: 'Track your order', href: '/tracker' } },
+      { id: 'nav-tracker', fields: { label: 'My Order', href: '/tracker' } },
     ],
   },
   // footer columns (site.ts footer.columns) — headings only; the links
@@ -156,7 +156,7 @@ const globalLists: ContentList[] = [
       { id: 'f-orders-2', fields: { label: 'Bulk pricing', href: '/#bulk' } },
       { id: 'f-orders-3', fields: { label: 'Delivery', href: '/#faq' } },
       { id: 'f-orders-4', fields: { label: 'FAQ', href: '/#faq' } },
-      { id: 'f-orders-5', fields: { label: 'Track your order', href: '/tracker' } },
+      { id: 'f-orders-5', fields: { label: 'My Order', href: '/tracker' } },
     ],
   },
   {
@@ -597,6 +597,13 @@ const homeLists: ContentList[] = [
           answer: 'We do. Send a sketch, a logo or a photograph of the thing you want and we will fold one as a sample before quoting the rest. Custom folds start at three days for a sample and ten days for a run of fifty.',
         },
       },
+      {
+        id: 'faq-7',
+        fields: {
+          question: 'Where do I get my digital download?',
+          answer: 'The confirmation email arrives the moment your payment clears, with a fresh link that stays good for 72 hours. If you missed it, open My Order in the menu, enter your order number with the email or phone you paid with, and every file you bought is listed there — with a Resend button if the link has run out. That page is the backup; the email is the fast path.',
+        },
+      },
     ],
   },
 ];
@@ -906,7 +913,7 @@ const productFields: ContentField[] = [
    ================================================================== */
 
 const trackerFields: ContentField[] = [
-  { key: 'tracker.header.title', label: 'Page title', type: 'text', value: 'Track your order', maxLength: 60, required: true, placeholder: true },
+  { key: 'tracker.header.title', label: 'Page title', type: 'text', value: 'My Order', maxLength: 60, required: true, placeholder: true },
   {
     key: 'tracker.header.lede',
     label: 'Page lede',
@@ -972,6 +979,70 @@ const trackerFields: ContentField[] = [
     placeholder: true,
   },
   { key: 'tracker.statuses.help-label', label: 'Help button label', type: 'text', value: 'Message the studio', maxLength: 32, required: true, placeholder: true },
+
+  // ---- Tier 5: digital downloads (DownloadBlock, shared by the My Order
+  // result view AND the checkout success page) ----
+  { key: 'tracker.downloads.title', label: 'Downloads heading', type: 'text', value: 'Your downloads', maxLength: 40, required: true, placeholder: true },
+  { key: 'tracker.downloads.download-label', label: 'Download button', type: 'text', value: 'Download', maxLength: 24, required: true, placeholder: true },
+  { key: 'tracker.downloads.valid-until-label', label: '"Link valid until" prefix', type: 'text', value: 'Link valid until', maxLength: 32, required: true, placeholder: true },
+  {
+    key: 'tracker.downloads.expired-note',
+    label: 'Expired link note',
+    type: 'longtext',
+    value: 'This link has expired — ask for a fresh one below.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
+  {
+    key: 'tracker.downloads.missing-note',
+    label: 'Missing file note',
+    type: 'longtext',
+    value: 'This file is no longer available — message the studio and we will sort it out.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
+  {
+    key: 'tracker.downloads.expired-no-identity',
+    label: 'Expired note (no identity)',
+    type: 'longtext',
+    value: 'This link has expired — open your order page to get a fresh one.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
+  { key: 'tracker.downloads.go-to-order-page', label: '"My Order" link', type: 'text', value: 'My Order', maxLength: 24, required: true, placeholder: true },
+  { key: 'tracker.downloads.sending-label', label: 'Resend — sending', type: 'text', value: 'Sending…', maxLength: 24, required: true, placeholder: true },
+  { key: 'tracker.downloads.resend-label', label: 'Resend button', type: 'text', value: 'Resend download link', maxLength: 40, required: true, placeholder: true },
+  { key: 'tracker.downloads.sent-label', label: 'Resend — sent', type: 'text', value: 'Sent — check your email', maxLength: 40, required: true, placeholder: true },
+  {
+    key: 'tracker.downloads.sent-note',
+    label: 'Resend success note',
+    type: 'longtext',
+    value: 'A fresh link is on its way to the email address on your order.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
+  {
+    key: 'tracker.downloads.rate-limited-note',
+    label: 'Resend rate-limit note',
+    type: 'longtext',
+    value: 'Too many requests — wait a minute and try again.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
+  {
+    key: 'tracker.downloads.error-note',
+    label: 'Resend failure note',
+    type: 'longtext',
+    value: 'Could not send the email — please try again.',
+    maxLength: 160,
+    required: true,
+    placeholder: true,
+  },
 ];
 
 const trackerLists: ContentList[] = [

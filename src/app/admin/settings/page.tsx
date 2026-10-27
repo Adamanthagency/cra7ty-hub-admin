@@ -27,7 +27,7 @@ const SEO_PAGES: { key: PageKey; label: string }[] = [
   { key: 'blog', label: 'Blog' },
   { key: 'about', label: 'About' },
   { key: 'product', label: 'Product page (fallback)' },
-  { key: 'tracker', label: 'Tracker (placeholder)' },
+  { key: 'tracker', label: 'My Order' },
 ];
 
 export default function SettingsPage() {

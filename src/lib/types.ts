@@ -64,6 +64,22 @@ export interface Product {
   specs: ProductSpec[];
   stock: number;
   status: 'active' | 'inactive';
+  /**
+   * Tier 5: 'physical' (default, stock-tracked) or 'digital'
+   * (delivered by a signed download link, never out of stock).
+   * Mirrors products.product_type, which has the same default so every
+   * pre-existing row stays 'physical'.
+   */
+  productType?: 'physical' | 'digital';
+  /**
+   * Digital only: the PRIVATE object path in the `digital-files` bucket.
+   * A path, never a URL — links are signed on demand and expire, so a
+   * stored URL would be a permanent credential. Undefined = no file
+   * attached yet (a digital product cannot be published without one).
+   */
+  downloadPath?: string;
+  /** Digital only: the buyer-facing filename used for the download. */
+  downloadFilename?: string;
   variants: ProductVariant[];
   tags: string[];
   images: string[];

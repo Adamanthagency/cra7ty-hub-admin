@@ -45,7 +45,7 @@ export const settings: SiteSettings = {
     },
     tracker: {
       placeholder: true,
-      title: 'Track your order — Cra7ty Hub',
+      title: 'My Order — Cra7ty Hub',
       description:
         'Look up a Cra7ty Hub order by its reference and see where it is.',
     },

@@ -94,6 +94,11 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
   const [photoNote, setPhotoNote] = useState<string | null>(null);
   const [photoNoteIsError, setPhotoNoteIsError] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  /** Tier 5: the digital file card runs its own upload, separately. */
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [fileNote, setFileNote] = useState<string | null>(null);
+  const [fileNoteIsError, setFileNoteIsError] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const patch = (partial: Partial<Product>) =>
     setProduct((prev) => ({ ...prev, ...partial }));
@@ -222,6 +227,81 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
       setPhotoNote((error as Error).message);
     } finally {
       setUploadingPhotos(false);
+    }
+  };
+
+  /**
+   * Tier 5: upload the digital file. Two round trips on purpose —
+   * the bytes go DIRECTLY to Storage (Vercel caps a request body at
+   * 4.5 MB, so a 40 MB PDF through this route would 413), then the
+   * server re-reads the stored object and enforces the real ceiling
+   * before we keep the path. The service key never reaches the browser.
+   */
+  const uploadDigitalFile = async (file: File | undefined | null) => {
+    if (!file || uploadingFile) return;
+
+    setFileNote(null);
+    setFileNoteIsError(false);
+    setUploadingFile(true);
+    try {
+      const signRes = await fetch('/admin/api/digital-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sign',
+          productId: product.id,
+          filename: file.name,
+          sizeBytes: file.size,
+        }),
+      });
+      const sign = (await signRes.json().catch(() => null)) as {
+        path?: string;
+        uploadUrl?: string;
+        contentType?: string;
+        error?: string;
+      } | null;
+      if (!signRes.ok || !sign?.uploadUrl || !sign.path) {
+        throw new Error(sign?.error ?? 'Could not prepare the upload.');
+      }
+
+      // The file goes straight to Storage — no Vercel body limit.
+      const put = await fetch(sign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': sign.contentType ?? file.type },
+        body: file,
+      });
+      if (!put.ok) {
+        throw new Error(`Storage rejected the file (HTTP ${put.status}).`);
+      }
+
+      // The server checks what actually landed (size + mime) and deletes
+      // anything it will not accept.
+      const confirmRes = await fetch('/admin/api/digital-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'confirm', path: sign.path }),
+      });
+      const confirmed = (await confirmRes.json().catch(() => null)) as {
+        path?: string;
+        error?: string;
+      } | null;
+      if (!confirmRes.ok || !confirmed?.path) {
+        throw new Error(confirmed?.error ?? 'The file could not be verified.');
+      }
+
+      patch({
+        downloadPath: confirmed.path,
+        downloadFilename: file.name,
+      });
+      setFileNoteIsError(false);
+      setFileNote(
+        `Attached “${file.name}”. Press Save to keep it with the product.`,
+      );
+    } catch (error) {
+      setFileNoteIsError(true);
+      setFileNote((error as Error).message);
+    } finally {
+      setUploadingFile(false);
     }
   };
 
@@ -962,6 +1042,140 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
               >
                 {saveNote}
               </p>
+            )}
+          </section>
+
+          {/* Delivery card — Tier 5: physical vs digital, and the file a
+              digital listing sells. Shown before Images because for a
+              digital product the file IS the product. */}
+          <section className="card-admin p-4">
+            <h2 className="mb-3 text-sm font-medium text-paper">Delivery</h2>
+
+            <div className="grid grid-cols-2 gap-2">
+              {(['physical', 'digital'] as const).map((kind) => {
+                const selected = (product.productType ?? 'physical') === kind;
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => {
+                      setFileNote(null);
+                      // One patch, not two: switching back to physical
+                      // must clear the file rather than carry it into a
+                      // row that will never deliver one (and a second
+                      // patch would just overwrite the first).
+                      patch(
+                        kind === 'physical'
+                          ? { productType: 'physical', downloadPath: undefined, downloadFilename: undefined }
+                          : { productType: 'digital' },
+                      );
+                    }}
+                    className={cn(
+                      'flex min-h-[44px] items-center justify-center rounded-card border px-3 font-mono text-[11px] uppercase tracking-[0.1em] transition-colors',
+                      selected
+                        ? 'border-vermilion bg-vermilion-20 text-paper'
+                        : 'border-line text-paper-60 hover:border-paper-40 hover:text-paper',
+                    )}
+                    aria-pressed={selected}
+                  >
+                    {kind === 'physical' ? 'Physical' : 'Digital'}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 font-mono text-[10px] leading-relaxed text-paper-40">
+              {(product.productType ?? 'physical') === 'digital'
+                ? 'Delivered instantly by download link — stock does not apply.'
+                : 'Stock-tracked and dispatched by WhatsApp confirmation.'}
+            </p>
+
+            {(product.productType ?? 'physical') === 'digital' && (
+              <div className="mt-4 border-t border-line pt-4">
+                <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
+                  File
+                </h3>
+
+                {product.downloadPath ? (
+                  <div className="rounded-card border border-line bg-kraft-12/50 px-3 py-3">
+                    <p className="truncate font-mono text-[11px] text-paper">
+                      {product.downloadFilename ?? product.downloadPath.split('/').pop()}
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] text-paper-40">
+                      Attached · stored privately
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        patch({ downloadPath: undefined, downloadFilename: undefined });
+                        setFileNoteIsError(false);
+                        setFileNote('File removed — press Save to apply.');
+                      }}
+                      className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-vermilion underline-offset-2 hover:underline"
+                    >
+                      Remove file
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingFile}
+                    className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed px-4 py-6 text-center transition-colors disabled:opacity-60"
+                  >
+                    <Upload size={16} aria-hidden className="text-kraft-60" />
+                    <span className="font-mono text-[11px] text-paper-70">
+                      {uploadingFile ? 'Uploading to Storage…' : 'Drop or click — upload the file'}
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
+                      pdf, zip, epub, png, jpg, webp, mp4, mp3 · max 100 MB
+                    </span>
+                  </button>
+                )}
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.zip,.epub,.png,.jpg,.jpeg,.webp,.mp4,.mp3,application/pdf,application/zip"
+                  aria-label="Upload digital product file"
+                  className="hidden"
+                  onChange={(e) => {
+                    void uploadDigitalFile(e.target.files?.[0]);
+                    e.target.value = '';
+                  }}
+                />
+
+                {product.downloadPath && !uploadingFile && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-card border border-line px-3 text-xs text-paper-70 hover:border-paper-40 hover:text-paper"
+                  >
+                    <Upload size={14} aria-hidden />
+                    Replace file
+                  </button>
+                )}
+
+                {fileNote && (
+                  <p
+                    role={fileNoteIsError ? 'alert' : 'status'}
+                    className={cn(
+                      'mt-3 font-mono text-[11px]',
+                      fileNoteIsError ? 'text-vermilion' : 'text-moss-bright'
+                    )}
+                  >
+                    {fileNote}
+                  </p>
+                )}
+
+                {(product.productType ?? 'physical') === 'digital' &&
+                  product.status === 'active' &&
+                  !product.downloadPath && (
+                    <p className="mt-3 font-mono text-[11px] text-vermilion">
+                      A published digital product needs its file — upload one
+                      above, or save it as a draft.
+                    </p>
+                  )}
+              </div>
             )}
           </section>
 
