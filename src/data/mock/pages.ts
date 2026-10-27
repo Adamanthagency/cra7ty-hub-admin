@@ -19,7 +19,7 @@ export const pages: PageMeta[] = [
   { key: 'blog', label: 'Blog', route: '/blog' },
   { key: 'about', label: 'About', route: '/about' },
   { key: 'product', label: 'Product page', route: '/products/[slug]' },
-  { key: 'tracker', label: 'Tracker', route: '/tracker (coming)' },
+  { key: 'tracker', label: 'Tracker', route: '/tracker' },
   { key: 'global', label: 'Site-wide', route: 'Every page' },
 ];
 
