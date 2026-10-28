@@ -49,6 +49,18 @@ const ALLOWED_MIME = new Map<string, string[]>([
   ['audio/mpeg', ['mp3']],
 ]);
 
+/** Reverse lookup: file extension (as the editor sends it) → MIME type.
+ *  Derived from ALLOWED_MIME so the two can never drift apart. The map
+ *  above is keyed by MIME (used by the confirm step's membership check);
+ *  looking it up the other way round with `.get(ext)` used to return the
+ *  EXTENSION ARRAY, and `Content-Type: ["pdf"]` is answered by Storage
+ *  with 415 InvalidMimeType — the "HTTP 400" upload bug. */
+const MIME_BY_EXT = new Map<string, string>(
+  Array.from(ALLOWED_MIME.entries()).flatMap(([mime, exts]) =>
+    exts.map((ext) => [ext, mime] as const),
+  ),
+);
+
 async function guard(request: NextRequest): Promise<NextResponse | null> {
   const auth = await requireAdmin(request);
   if (auth instanceof NextResponse) return auth;
@@ -115,27 +127,9 @@ export async function POST(request: NextRequest) {
     }
 
     const ext = (filename.split('.').pop() ?? '').toLowerCase();
-    const mime = ALLOWED_MIME.get(
-      // The browser reports the MIME; we fall back to the extension so a
-      // client that sends an empty type still lands on the right entry.
-      ext === 'jpg' || ext === 'jpeg'
-        ? 'image/jpeg'
-        : ext === 'pdf'
-          ? 'application/pdf'
-          : ext === 'zip'
-            ? 'application/zip'
-            : ext === 'epub'
-              ? 'application/epub+zip'
-              : ext === 'png'
-                ? 'image/png'
-                : ext === 'webp'
-                  ? 'image/webp'
-                  : ext === 'mp4'
-                    ? 'video/mp4'
-                    : ext === 'mp3'
-                      ? 'audio/mpeg'
-                      : '',
-    );
+    // The browser reports the MIME; we fall back to the extension so a
+    // client that sends an empty type still lands on the right entry.
+    const mime = MIME_BY_EXT.get(ext) ?? '';
     if (!mime) {
       return NextResponse.json(
         {
