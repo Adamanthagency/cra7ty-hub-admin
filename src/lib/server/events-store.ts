@@ -44,12 +44,14 @@ interface EventRowRaw {
   position: number;
   created_at: string;
   updated_at: string;
-  registrations?: { payment_status: string; needs_review: boolean }[];
+  // The embed name must be the REAL table PostgREST can walk the FK
+  // from — `registrations` does not exist, `event_registrations` does.
+  event_registrations?: { payment_status: string; needs_review: boolean }[];
   event_waitlist?: { id: string }[];
 }
 
 function mapEvent(row: EventRowRaw): EventRow {
-  const regs = row.registrations ?? [];
+  const regs = row.event_registrations ?? [];
   const seatsTaken = regs.filter((r) => r.payment_status === 'paid' && !r.needs_review).length;
   const pendingCount = regs.filter((r) => r.payment_status === 'pending').length;
   const reviewCount = regs.filter((r) => r.needs_review && r.payment_status === 'paid').length;
@@ -88,7 +90,7 @@ function mapEvent(row: EventRowRaw): EventRow {
 export async function loadEvents(): Promise<EventRow[]> {
   const rows = await rest<EventRowRaw[]>(
     `events?select=${EVENT_COLUMNS},` +
-      `registrations(payment_status,needs_review),` +
+      `event_registrations(payment_status,needs_review),` +
       `event_waitlist(id)` +
       `&order=starts_at.asc`,
   );
@@ -99,7 +101,7 @@ export async function loadEvents(): Promise<EventRow[]> {
 export async function loadEvent(id: string): Promise<EventRow | null> {
   const rows = await rest<EventRowRaw[]>(
     `events?select=${EVENT_COLUMNS},` +
-      `registrations(payment_status,needs_review),` +
+      `event_registrations(payment_status,needs_review),` +
       `event_waitlist(id)` +
       `&id=eq.${encodeURIComponent(id)}&limit=1`,
   );
