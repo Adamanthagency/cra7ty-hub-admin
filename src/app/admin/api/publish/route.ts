@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requireAdmin } from '@/lib/server/admin-guard';
 import { configProblem, savePublish } from '@/lib/server/content-store';
 import { revalidateStorefront } from '@/lib/server/revalidate';
+import { contentLists } from '@/data/mock/content';
 import type { PublishPayload } from '@/lib/publish-api';
 
 /**
@@ -84,8 +85,17 @@ export async function POST(request: NextRequest) {
   ) {
     return badRequest('`revision` must carry id, at, author and changes[].');
   }
+  const listDefs = new Map(contentLists.map((list) => [list.key, list]));
   for (const [listKey, items] of Object.entries(lists)) {
     if (!Array.isArray(items)) return badRequest(`List "${listKey}" is not an array.`);
+    const def = listDefs.get(listKey);
+    if (def?.maxItems !== undefined && items.length > def.maxItems) {
+      // the editor stops offering "Add" at the cap; this is the same rule
+      // held server-side so a hand-built payload cannot exceed it
+      return badRequest(
+        `List "${listKey}" takes at most ${def.maxItems} item${def.maxItems === 1 ? '' : 's'} — ${items.length} were sent.`,
+      );
+    }
   }
   for (const section of sections) {
     if (typeof section?.id !== 'string' || typeof section?.position !== 'number') {

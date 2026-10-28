@@ -192,8 +192,7 @@ const homeFields: ContentField[] = [
     key: 'home.hero.subline',
     label: 'Subline',
     type: 'longtext',
-    value:
-      'Origami cranes, pressed paper plates, party packs and gift wrap. Counted, stacked and wrapped to order — then sent to you on WhatsApp.',
+    value: 'exploring the diversity of paper art and crafts',
     maxLength: 260,
     required: true,
   },
@@ -355,6 +354,19 @@ const homeLists: ContentList[] = [
       { id: 'hero-stat-2', fields: { value: '₦1,500', label: 'for one crane, folded by hand' } },
       { id: 'hero-stat-3', fields: { value: '24 hrs', label: 'Lagos turnaround on party packs' } },
     ],
+  },
+  // hero slideshow: the admin's own images, in the admin's own order —
+  // Hero.tsx renders these instead of the procedural crane when any exist.
+  // Empty seed: nothing is promoted to the hero until someone uploads it.
+  {
+    key: 'home.hero.slideshow',
+    label: 'Hero slideshow',
+    maxItems: 10,
+    itemFields: [
+      { key: 'image', label: 'Image', type: 'image', required: true },
+      { key: 'caption', label: 'Caption', type: 'text', maxLength: 40, required: false },
+    ],
+    items: [],
   },
   // hero's own marquee strip (Hero.tsx renders <Marquee /> with the
   // default site.marqueeWords — separate from the mid-page 4-word strip)

@@ -29,6 +29,8 @@ const newId = () => `item-${Date.now()}-${++uid}`;
 export function ListEditor({ list, items, onChange, itemNoun }: ListEditorProps) {
   const [removing, setRemoving] = useState<ContentListItem | null>(null);
   const fixed = list.fixed === true;
+  const atCap =
+    list.maxItems !== undefined && items.length >= list.maxItems;
 
   const patch = (id: string, key: string, value: string | number | boolean) => {
     onChange(
@@ -179,16 +181,23 @@ export function ListEditor({ list, items, onChange, itemNoun }: ListEditorProps)
         </p>
       )}
 
-      {!fixed && (
-        <button
-          type="button"
-          onClick={add}
-          className="mt-3 inline-flex h-9 items-center gap-2 rounded-card border border-line px-3 text-sm text-paper-70 hover:border-paper-40 hover:text-paper"
-        >
-          <Plus size={14} aria-hidden />
-          Add {itemNoun}
-        </button>
-      )}
+      {!fixed &&
+        (atCap ? (
+          <p className="mt-3 font-mono text-[10px] text-paper-40">
+            {list.maxItems} {itemNoun}
+            {list.maxItems === 1 ? '' : 's'} maximum — remove one before
+            adding another.
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={add}
+            className="mt-3 inline-flex h-9 items-center gap-2 rounded-card border border-line px-3 text-sm text-paper-70 hover:border-paper-40 hover:text-paper"
+          >
+            <Plus size={14} aria-hidden />
+            Add {itemNoun}
+          </button>
+        ))}
 
       <ConfirmDialog
         open={removing !== null}

@@ -20,6 +20,7 @@ const NOUNS: Record<string, string> = {
   'global.footer.studio-links': 'link',
   'global.footer.columns': 'column',
   'home.hero.stats': 'stat',
+  'home.hero.slideshow': 'slide',
   'home.hero.marquee.words': 'word',
   'home.marquee.words': 'word',
   'home.process.steps': 'step',

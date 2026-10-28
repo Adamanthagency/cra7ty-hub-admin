@@ -270,6 +270,10 @@ export interface ContentList {
   label: string;
   itemFields: ListItemFieldDef[];
   items: ContentListItem[];
+  /** hard cap on membership (hero slideshow = 10): the editor stops
+   *  offering "Add" at the cap and the publish API rejects a payload
+   *  that exceeds it */
+  maxItems?: number;
   /** fixed membership: edit fields only, no add/remove/reorder
    *  (bulk tiers, status labels, sort options, computed label groups) */
   fixed?: boolean;
