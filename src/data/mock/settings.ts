@@ -12,7 +12,7 @@ export const settings: SiteSettings = {
   whatsappNumber: '234XXXXXXXXXX',
   whatsappDisplay: '+234 XXXX XXX XXXX',
   email: 'orders@cra7tyhub.ng',
-  address: 'No. 14, Glover Road, Surulere, Lagos',
+  address: 'Victory Estate, Ago Palace Way, Okota, Lagos',
   instagram: 'cra7tyhub',
   freeDeliveryOver: 50000,
   seo: {
@@ -34,7 +34,7 @@ export const settings: SiteSettings = {
     about: {
       title: 'About — Cra7ty Hub',
       description:
-        'The Cra7ty Hub studio: one room on Glover Road in Surulere, Lagos, folding paper since 2019. How the orders work, how bulk works, and how to reach the people who fold it.',
+        'The Cra7ty Hub studio: one room on Ago Palace Way in Okota, Lagos, folding paper since 2019. How the orders work, how bulk works, and how to reach the people who fold it.',
     },
     product: {
       // per-product routes compose their own title/description from product

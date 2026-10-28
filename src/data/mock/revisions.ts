@@ -45,8 +45,8 @@ export const revisions: Revision[] = [
       {
         key: 'home.process.steps:process-2:title',
         label: 'Process — step 2 title',
-        from: 'We fold it in Lagos',
-        to: 'We fold it in Surulere',
+        from: 'We fold it in Surulere',
+        to: 'We fold it in Okota',
       },
     ],
   },

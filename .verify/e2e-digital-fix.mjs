@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { adminLogin } from './lib-auth.mjs';
 
-const BASE = 'http://localhost:3005';
+const BASE = process.env.ADMIN_BASE ?? 'http://localhost:3005';
 const env = Object.fromEntries(
   readFileSync(new URL('../.env.local', import.meta.url), 'utf8')
     .split('\n').filter((l) => l.includes('=') && !l.trim().startsWith('#'))

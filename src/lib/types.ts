@@ -348,3 +348,69 @@ export interface DraftState {
   after: unknown;
   at: string; // ISO datetime
 }
+
+/* ================================================================== 
+   EVENTS (Tier 6 — workshops & exhibitions)
+   ================================================================== */
+
+export type EventKind = 'workshop' | 'exhibition';
+export type EventStatus = 'draft' | 'published' | 'cancelled';
+export type EventPaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+
+/** One event as the admin screens see it (seats are computed server-side). */
+export interface EventRow {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  kind: EventKind;
+  startsAt: string;
+  endsAt: string | null;
+  /** null = use the studio address from site settings. */
+  location: string | null;
+  /** whole naira; 0 = free */
+  price: number;
+  /** null = unlimited */
+  capacity: number | null;
+  imageUrl: string | null;
+  status: EventStatus;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  /** paid, non-flagged registrations */
+  seatsTaken: number;
+  spotsRemaining: number | null;
+  soldOut: boolean;
+  pendingCount: number;
+  reviewCount: number;
+  waitlistCount: number;
+}
+
+/** One registration = one ticket (payment axis mirrors orders). */
+export interface EventRegistrationRow {
+  id: string;
+  registrationNumber: string;
+  reference: string;
+  attendeeName: string;
+  attendeeEmail: string;
+  attendeePhone: string;
+  pricePaid: number;
+  eventName: string;
+  eventDate: string;
+  eventLocation: string;
+  paymentStatus: EventPaymentStatus;
+  needsReview: boolean;
+  reviewReason: string | null;
+  paymentDate: string | null;
+  createdAt: string;
+}
+
+/** One waitlist request — no payment, no ticket. */
+export interface EventWaitlistRow {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  status: 'waiting' | 'notified';
+  createdAt: string;
+}

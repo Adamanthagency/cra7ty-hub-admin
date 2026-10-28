@@ -110,6 +110,7 @@ const globalLists: ContentList[] = [
       { id: 'nav-origami', fields: { label: 'Origami', href: '/shop?category=origami' } },
       { id: 'nav-party', fields: { label: 'Party Packs', href: '/shop?category=party' } },
       { id: 'nav-bulk', fields: { label: 'Bulk Orders', href: '/#bulk' } },
+      { id: 'nav-workshops', fields: { label: 'Workshops', href: '/workshops' } },
       { id: 'nav-blog', fields: { label: 'Blog', href: '/blog' } },
       { id: 'nav-about', fields: { label: 'About', href: '/about' } },
       { id: 'nav-tracker', fields: { label: 'My Order', href: '/tracker' } },
@@ -170,6 +171,7 @@ const globalLists: ContentList[] = [
       { id: 'f-studio-1', fields: { label: 'About the folds', href: '/#process' } },
       { id: 'f-studio-2', fields: { label: 'Why paper', href: '/#why' } },
       { id: 'f-studio-3', fields: { label: 'Custom work', href: '/#bulk' } },
+      { id: 'f-studio-6', fields: { label: 'Workshops', href: '/workshops' } },
       { id: 'f-studio-4', fields: { label: 'Blog', href: '/blog' } },
       { id: 'f-studio-5', fields: { label: 'Contact', href: '/#footer-contact' } },
     ],
@@ -331,7 +333,7 @@ const homeFields: ContentField[] = [
     label: 'Side card body',
     type: 'longtext',
     value:
-      'Messages go to the studio in Surulere, not to a queue. Send a photo of your event colours and we will tell you what we can actually make, and what it costs.',
+      'Messages go to the studio in Okota, not to a queue. Send a photo of your event colours and we will tell you what we can actually make, and what it costs.',
     maxLength: 280,
     required: true,
   },
@@ -424,7 +426,7 @@ const homeLists: ContentList[] = [
         id: 'process-2',
         fields: {
           index: '02',
-          title: 'We fold it in Surulere',
+          title: 'We fold it in Okota',
           body: 'Three to five working days for a two-hundred guest order. Every crease is made by hand, which is exactly why bulk means we start earlier rather than fold faster.',
         },
       },
@@ -735,10 +737,10 @@ const blogLists: ContentList[] = [
 
 const aboutFields: ContentField[] = [
   // hero (site.ts aboutPage.hero + AboutHero.tsx JSX)
-  { key: 'about.hero.eyebrow', label: 'Eyebrow', type: 'text', value: 'The studio / Surulere / Est. 2019', maxLength: 60, required: true },
+  { key: 'about.hero.eyebrow', label: 'Eyebrow', type: 'text', value: 'The studio / Okota / Est. 2019', maxLength: 60, required: true },
   { key: 'about.hero.headline.0', label: 'Headline line 1', type: 'text', value: 'Paper, folded', maxLength: 40, required: true },
-  { key: 'about.hero.headline.1', label: 'Headline line 2', type: 'text', value: 'in Surulere', maxLength: 40, required: true },
-  { key: 'about.hero.emphasis-word', label: 'Italic emphasis word', type: 'text', value: 'Surulere', maxLength: 24, required: true },
+  { key: 'about.hero.headline.1', label: 'Headline line 2', type: 'text', value: 'in Okota', maxLength: 40, required: true },
+  { key: 'about.hero.emphasis-word', label: 'Italic emphasis word', type: 'text', value: 'Okota', maxLength: 24, required: true },
   {
     key: 'about.hero.subline',
     label: 'Subline',
@@ -781,7 +783,7 @@ const aboutFields: ContentField[] = [
     label: 'Card body',
     type: 'longtext',
     value:
-      'Messages go to the studio in Surulere, not to a queue. Send a guest count, a colour or a photograph and you will hear back the same day.',
+      'Messages go to the studio in Okota, not to a queue. Send a guest count, a colour or a photograph and you will hear back the same day.',
     maxLength: 280,
     required: true,
   },
@@ -825,8 +827,8 @@ const aboutLists: ContentList[] = [
         id: 'station-1',
         fields: {
           index: '01',
-          title: 'The room on Glover Road',
-          body: 'Everything sold here leaves from one address: No. 14, Glover Road, Surulere, Lagos. Six shelves, two presses and a cutting table — the folding, the pressing and the counting happen in the same room, at the same table, usually on the same day.',
+          title: 'The room on Ago Palace Way',
+          body: 'Everything sold here leaves from one address: Victory Estate, Ago Palace Way, Okota, Lagos. Six shelves, two presses and a cutting table — the folding, the pressing and the counting happen in the same room, at the same table, usually on the same day.',
         },
       },
       {
@@ -834,7 +836,7 @@ const aboutLists: ContentList[] = [
         fields: {
           index: '02',
           title: 'Folding since 2019',
-          body: 'The studio has folded paper for money since 2019. Cranes, boxes, plates and party packs have gone out of the same Surulere room since then — what changed is the number of shelves, not the method.',
+          body: 'The studio has folded paper for money since 2019. Cranes, boxes, plates and party packs have gone out of the same Okota room since then — what changed is the number of shelves, not the method.',
         },
       },
       {
