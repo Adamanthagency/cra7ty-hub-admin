@@ -156,6 +156,34 @@ export function SectionForm({ section, page, onClose }: SectionFormProps) {
 
   return (
     <div className="space-y-4">
+      {lists.length > 0 && (
+        <nav
+          aria-label="Jump to a list"
+          className="flex flex-wrap items-center gap-2 border-b border-line pb-3"
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper-60">
+            Jump to
+          </span>
+          {lists.map((l) => (
+            <button
+              key={l.key}
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById(`section-list-${l.key}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+              className="inline-flex h-7 items-center gap-1.5 rounded-card border border-line px-2 font-mono text-[10px] text-paper-70 hover:border-paper-40 hover:text-paper"
+            >
+              {l.label}
+              <span className="tabular-nums text-paper-40">
+                {(localLists[l.key] ?? []).length}
+              </span>
+            </button>
+          ))}
+        </nav>
+      )}
+
       {fields.length === 0 && lists.length === 0 && (
         <p className="rounded-card border border-dashed border-line p-4 text-center font-mono text-xs text-paper-60">
           This section has no editable copy — it renders products, categories
@@ -180,16 +208,21 @@ export function SectionForm({ section, page, onClose }: SectionFormProps) {
       ))}
 
       {lists.map((l) => (
-        <ListEditor
+        <div
           key={l.key}
-          list={l}
-          items={localLists[l.key] ?? []}
-          itemNoun={NOUNS[l.key] ?? 'item'}
-          onChange={(items) => {
-            setSaved(false);
-            setLocalLists((prev) => ({ ...prev, [l.key]: items }));
-          }}
-        />
+          id={`section-list-${l.key}`}
+          className="scroll-mt-2"
+        >
+          <ListEditor
+            list={l}
+            items={localLists[l.key] ?? []}
+            itemNoun={NOUNS[l.key] ?? 'item'}
+            onChange={(items) => {
+              setSaved(false);
+              setLocalLists((prev) => ({ ...prev, [l.key]: items }));
+            }}
+          />
+        </div>
       ))}
 
       {section.variants && section.variants.length > 0 && (

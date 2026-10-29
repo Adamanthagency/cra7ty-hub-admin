@@ -9,9 +9,8 @@ import { VariantIndicator } from '@/components/admin/variant-indicator';
 import { MediaPicker } from '@/components/admin/workbench/media-picker';
 import { useContent } from '@/components/admin/workbench/content-provider';
 import { MediaImg } from '@/components/admin/media-img';
-import { productCategories } from '@/data/mock/products';
 import { MEDIA_RULES } from '@/data/mock/media';
-import type { MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
+import type { Category, MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
 import { saveProduct } from '@/lib/catalog-api';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -70,7 +69,7 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
   // The upload zone writes through the SAME path as the Media page
   // (POST /admin/api/media → Storage + media table), and the shared
   // library state updates with it.
-  const { uploadMedia } = useContent();
+  const { uploadMedia, categories, drafts } = useContent();
   const [product, setProduct] = useState<Product>(initial);
   const [activeType, setActiveType] = useState<VariantType>('colour');
   /** Variant being edited — drives indicators + drawer. */
@@ -113,6 +112,19 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
     () => product.variants.filter((v) => v.type === activeType),
     [product.variants, activeType]
   );
+
+  // Category options come from the LIVE category set (the Categories
+  // manager, including a saved-but-unpublished draft) — not the seed
+  // product list, which is why a newly added category never appeared here.
+  // The product's own value always stays selectable, so a category removed
+  // later can never blank the field on an existing product.
+  const categoryOptions = useMemo(() => {
+    const pending = drafts.find((d) => d.type === 'category');
+    const rows = (pending ? (pending.after as Category[]) : categories) ?? [];
+    const options = new Set(rows.map((r) => r.id).filter(Boolean));
+    if (product.category) options.add(product.category);
+    return Array.from(options).sort();
+  }, [categories, drafts, product.category]);
 
   const editing = product.variants.find((v) => v.id === editingId) ?? null;
 
@@ -483,7 +495,7 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                   onChange={(e) => patch({ category: e.target.value })}
                   className="input-hairline"
                 >
-                  {productCategories.map((c) => (
+                  {categoryOptions.map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>

@@ -7,9 +7,10 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { StatusChip } from '@/components/admin/status-chip';
-import { productCategories, products as seed } from '@/data/mock/products';
+import { products as seed } from '@/data/mock/products';
 import { deleteProduct, fetchProducts, saveProduct } from '@/lib/catalog-api';
-import type { Product } from '@/lib/types';
+import { useContent } from '@/components/admin/workbench/content-provider';
+import type { Category, Product } from '@/lib/types';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +31,17 @@ function ProductsContent() {
   // Instant paint from the seed, then hydrate from the live table — the
   // database is the source of truth, the seed is only the offline fallback.
   const [rows, setRows] = useState<Product[]>(seed);
+  // Filter options track the LIVE category set (incl. a saved draft) plus
+  // every category the loaded rows actually carry — the old seed-derived
+  // list silently missed categories added after launch.
+  const { categories, drafts } = useContent();
+  const categoryOptions = useMemo(() => {
+    const pending = drafts.find((d) => d.type === 'category');
+    const catRows = (pending ? (pending.after as Category[]) : categories) ?? [];
+    const options = new Set(catRows.map((r) => r.id).filter(Boolean));
+    for (const p of rows) if (p.category) options.add(p.category);
+    return Array.from(options).sort();
+  }, [categories, drafts, rows]);
   const [liveStatus, setLiveStatus] = useState<'loading' | 'live' | 'offline'>('loading');
   const [liveError, setLiveError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -254,7 +266,7 @@ function ProductsContent() {
           className="input-hairline w-auto"
         >
           <option value="all">All categories</option>
-          {productCategories.map((c) => (
+          {categoryOptions.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
