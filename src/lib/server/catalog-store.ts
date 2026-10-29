@@ -22,7 +22,6 @@ import { configProblem, rest } from '@/lib/server/content-store';
  */
 
 const MODELS: ModelKey[] = ['crane', 'plate', 'spoon', 'box', 'flower', 'cup', 'sheet'];
-const CATEGORIES = ['origami', 'table', 'party', 'gift', 'bulk', 'paper'];
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -164,8 +163,16 @@ export function validateProduct(input: unknown): { error: string } | { product: 
   }
   if (!isStr(p.name, 160) || !p.name.trim()) return { error: 'The product needs a name.' };
   if (!isStr(p.description, 600)) return { error: 'The description is too long (600 characters max).' };
-  if (typeof p.category !== 'string' || !CATEGORIES.includes(p.category)) {
-    return { error: `Category must be one of: ${CATEGORIES.join(', ')}.` };
+  // Category is the shelf id from the admin's Categories manager — a slug
+  // (lowercase, digits, single dashes), the same rule that manager and the
+  // publish route enforce. Validating against a fixed list here is what
+  // stopped newly added categories from ever saving; the shape check keeps
+  // garbage out without needing a code change per category.
+  if (typeof p.category !== 'string' || !SLUG_PATTERN.test(p.category)) {
+    return {
+      error:
+        'The category must be lowercase letters, numbers and single dashes (like wedding-favours) — pick it from the Category dropdown.',
+    };
   }
   if (typeof p.price !== 'number' || !Number.isInteger(p.price) || p.price < 0) {
     return { error: 'Price must be a whole number of naira.' };
