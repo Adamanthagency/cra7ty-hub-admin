@@ -15,6 +15,7 @@ import type { AdminMessage } from '@/lib/visual-bridge';
 /* Nouns for the ListEditor "Add …" button — mirrors SectionForm. */
 const NOUNS: Record<string, string> = {
   'global.navigation.links': 'link',
+  'global.navigation.order-links': 'item',
   'global.footer.shop-links': 'link',
   'global.footer.orders-links': 'link',
   'global.footer.studio-links': 'link',

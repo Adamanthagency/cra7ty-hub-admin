@@ -12,6 +12,7 @@ import { VariantChips } from './variant-chips';
 /** plural noun per list key, for the "Add …" button */
 const NOUNS: Record<string, string> = {
   'global.navigation.links': 'link',
+  'global.navigation.order-links': 'item',
   'global.footer.shop-links': 'link',
   'global.footer.orders-links': 'link',
   'global.footer.studio-links': 'link',

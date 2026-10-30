@@ -106,14 +106,30 @@ const globalLists: ContentList[] = [
       { key: 'href', label: 'Link', type: 'link', maxLength: 120, required: true },
     ],
     items: [
+      { id: 'nav-home', fields: { label: 'Home', href: '/' } },
       { id: 'nav-shop', fields: { label: 'Shop', href: '/shop' } },
-      { id: 'nav-origami', fields: { label: 'Origami', href: '/shop?category=origami' } },
-      { id: 'nav-party', fields: { label: 'Party Packs', href: '/shop?category=party' } },
-      { id: 'nav-bulk', fields: { label: 'Bulk Orders', href: '/#bulk' } },
+      // `nav-order` is the id SiteNav hangs the Order dropdown off —
+      // renaming it collapses Order back to a plain link.
+      { id: 'nav-order', fields: { label: 'Order', href: '/tracker' } },
+      { id: 'nav-events', fields: { label: 'Events', href: '/events' } },
       { id: 'nav-workshops', fields: { label: 'Workshops', href: '/workshops' } },
+      { id: 'nav-courses', fields: { label: 'Courses', href: '/courses' } },
       { id: 'nav-blog', fields: { label: 'Blog', href: '/blog' } },
       { id: 'nav-about', fields: { label: 'About', href: '/about' } },
-      { id: 'nav-tracker', fields: { label: 'My Order', href: '/tracker' } },
+    ],
+  },
+  // Order submenu — SiteNav renders these under the nav item with id
+  // `nav-order`. Empty list = Order falls back to a plain link.
+  {
+    key: 'global.navigation.order-links',
+    label: 'Order submenu',
+    itemFields: [
+      { key: 'label', label: 'Label', type: 'text', maxLength: 24, required: true },
+      { key: 'href', label: 'Link', type: 'link', maxLength: 120, required: true },
+    ],
+    items: [
+      { id: 'nav-order-mine', fields: { label: 'My Order', href: '/tracker' } },
+      { id: 'nav-order-bulk', fields: { label: 'Bulk Order', href: '/#bulk' } },
     ],
   },
   // footer columns (site.ts footer.columns) — headings only; the links
@@ -173,6 +189,8 @@ const globalLists: ContentList[] = [
       { id: 'f-studio-3', fields: { label: 'Custom work', href: '/#bulk' } },
       { id: 'f-studio-6', fields: { label: 'Workshops', href: '/workshops' } },
       { id: 'f-studio-4', fields: { label: 'Blog', href: '/blog' } },
+      { id: 'f-studio-7', fields: { label: 'Events', href: '/events' } },
+      { id: 'f-studio-8', fields: { label: 'Courses', href: '/courses' } },
       { id: 'f-studio-5', fields: { label: 'Contact', href: '/#footer-contact' } },
     ],
   },
