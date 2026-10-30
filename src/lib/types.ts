@@ -17,6 +17,17 @@ export interface ProductSpec {
   value: string;
 }
 
+/** One file a digital product ships (Tier 7 — up to 10 per product). */
+export interface ProductDownloadFile {
+  /** Bucket-relative path inside the private `digital-files` bucket. */
+  path: string;
+  /** The buyer-facing name — what the download saves as. */
+  filename: string;
+}
+
+/** The per-product file cap — the same 10-item rule the hero slideshow uses. */
+export const MAX_DOWNLOAD_FILES = 10;
+
 export interface ProductVariant {
   /** Stable id, unique within the product. */
   id: string;
@@ -72,14 +83,14 @@ export interface Product {
    */
   productType?: 'physical' | 'digital';
   /**
-   * Digital only: the PRIVATE object path in the `digital-files` bucket.
-   * A path, never a URL — links are signed on demand and expire, so a
-   * stored URL would be a permanent credential. Undefined = no file
-   * attached yet (a digital product cannot be published without one).
+   * Digital only: the PRIVATE files this listing sells, in delivery
+   * order (max MAX_DOWNLOAD_FILES). Each entry holds a bucket-relative
+   * PATH in the `digital-files` bucket — never a URL: links are signed
+   * on demand and expire, so a stored URL would be a permanent
+   * credential. Absent or empty = no file attached yet (a published
+   * digital product needs at least one).
    */
-  downloadPath?: string;
-  /** Digital only: the buyer-facing filename used for the download. */
-  downloadFilename?: string;
+  downloadFiles?: ProductDownloadFile[];
   variants: ProductVariant[];
   tags: string[];
   images: string[];

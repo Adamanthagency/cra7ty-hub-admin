@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, type DragEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Images, Plus, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Images, Plus, Upload, X } from 'lucide-react';
 import { PageHeader } from '@/components/admin/page-header';
 import { VariantIndicator } from '@/components/admin/variant-indicator';
 import { MediaPicker } from '@/components/admin/workbench/media-picker';
@@ -11,6 +11,7 @@ import { useContent } from '@/components/admin/workbench/content-provider';
 import { MediaImg } from '@/components/admin/media-img';
 import { MEDIA_RULES } from '@/data/mock/media';
 import type { Category, MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
+import { MAX_DOWNLOAD_FILES } from '@/lib/types';
 import { saveProduct } from '@/lib/catalog-api';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -98,6 +99,14 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
   const [fileNote, setFileNote] = useState<string | null>(null);
   const [fileNoteIsError, setFileNoteIsError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * Which slot the next upload fills — null appends a new file, a number
+   * replaces the file already at that index (each upload gets its own
+   * object path, so a replace never disturbs an old order's grant).
+   */
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  const downloadFiles = product.downloadFiles ?? [];
+  const filesAtCap = downloadFiles.length >= MAX_DOWNLOAD_FILES;
 
   const patch = (partial: Partial<Product>) =>
     setProduct((prev) => ({ ...prev, ...partial }));
@@ -252,6 +261,18 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
   const uploadDigitalFile = async (file: File | undefined | null) => {
     if (!file || uploadingFile) return;
 
+    const files = downloadFiles;
+    const target = replaceIndex;
+    // Same 10-item cap as the list editors: the button is already hidden
+    // at the cap, this is the same rule held against the state itself.
+    if (target === null && files.length >= MAX_DOWNLOAD_FILES) {
+      setFileNoteIsError(true);
+      setFileNote(
+        `${MAX_DOWNLOAD_FILES} files maximum — remove one before adding another.`,
+      );
+      return;
+    }
+
     setFileNote(null);
     setFileNoteIsError(false);
     setUploadingFile(true);
@@ -301,19 +322,26 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
         throw new Error(confirmed?.error ?? 'The file could not be verified.');
       }
 
-      patch({
-        downloadPath: confirmed.path,
-        downloadFilename: file.name,
-      });
+      const next = [...files];
+      const entry = { path: confirmed.path, filename: file.name };
+      if (target !== null && target >= 0 && target < next.length) {
+        next[target] = entry;
+      } else {
+        next.push(entry);
+      }
+      patch({ downloadFiles: next });
       setFileNoteIsError(false);
       setFileNote(
-        `Attached “${file.name}”. Press Save to keep it with the product.`,
+        target !== null && target < files.length
+          ? `Replaced with “${file.name}”. Press Save to keep it with the product.`
+          : `Attached “${file.name}”. Press Save to keep it with the product.`,
       );
     } catch (error) {
       setFileNoteIsError(true);
       setFileNote((error as Error).message);
     } finally {
       setUploadingFile(false);
+      setReplaceIndex(null);
     }
   };
 
@@ -1078,7 +1106,7 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                       // patch would just overwrite the first).
                       patch(
                         kind === 'physical'
-                          ? { productType: 'physical', downloadPath: undefined, downloadFilename: undefined }
+                          ? { productType: 'physical', downloadFiles: undefined }
                           : { productType: 'digital' },
                       );
                     }}
@@ -1103,43 +1131,115 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
 
             {(product.productType ?? 'physical') === 'digital' && (
               <div className="mt-4 border-t border-line pt-4">
-                <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
-                  File
-                </h3>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
+                    Files
+                  </h3>
+                  <span className="font-mono text-[11px] text-paper-40">
+                    {downloadFiles.length} of {MAX_DOWNLOAD_FILES}
+                  </span>
+                </div>
 
-                {product.downloadPath ? (
-                  <div className="rounded-card border border-line bg-kraft-12/50 px-3 py-3">
-                    <p className="truncate font-mono text-[11px] text-paper">
-                      {product.downloadFilename ?? product.downloadPath.split('/').pop()}
-                    </p>
-                    <p className="mt-1 font-mono text-[10px] text-paper-40">
-                      Attached · stored privately
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        patch({ downloadPath: undefined, downloadFilename: undefined });
-                        setFileNoteIsError(false);
-                        setFileNote('File removed — press Save to apply.');
-                      }}
-                      className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-vermilion underline-offset-2 hover:underline"
-                    >
-                      Remove file
-                    </button>
-                  </div>
+                {downloadFiles.length > 0 && (
+                  <ol className="space-y-2">
+                    {downloadFiles.map((file, index) => (
+                      <li
+                        key={file.path}
+                        className="rounded-card border border-line bg-kraft-12/50 px-3 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="font-mono text-[10px] tabular-nums text-paper-40">
+                              {String(index + 1).padStart(2, '0')}
+                            </span>
+                            <p className="truncate font-mono text-[11px] text-paper">
+                              {file.filename}
+                            </p>
+                            <p className="mt-1 font-mono text-[10px] text-paper-40">
+                              Attached · stored privately
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              aria-label={`Move ${file.filename} up`}
+                              disabled={index === 0}
+                              onClick={() => {
+                                const next = [...downloadFiles];
+                                [next[index], next[index - 1]] = [next[index - 1]!, next[index]!];
+                                patch({ downloadFiles: next });
+                              }}
+                              className="rounded-card p-2 text-paper-60 hover:bg-paper-12 hover:text-paper disabled:pointer-events-none disabled:opacity-30"
+                            >
+                              <ArrowUp size={13} aria-hidden />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Move ${file.filename} down`}
+                              disabled={index === downloadFiles.length - 1}
+                              onClick={() => {
+                                const next = [...downloadFiles];
+                                [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                                patch({ downloadFiles: next });
+                              }}
+                              className="rounded-card p-2 text-paper-60 hover:bg-paper-12 hover:text-paper disabled:pointer-events-none disabled:opacity-30"
+                            >
+                              <ArrowDown size={13} aria-hidden />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFileNote(null);
+                                setReplaceIndex(index);
+                                fileInputRef.current?.click();
+                              }}
+                              className="rounded-card px-2 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-paper-60 hover:text-paper"
+                            >
+                              Replace
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.filename}`}
+                              onClick={() => {
+                                patch({
+                                  downloadFiles: downloadFiles.filter((_, i) => i !== index),
+                                });
+                                setFileNoteIsError(false);
+                                setFileNote('File removed — press Save to apply.');
+                              }}
+                              className="rounded-card p-2 text-paper-40 hover:text-vermilion"
+                            >
+                              <X size={13} aria-hidden />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                {filesAtCap ? (
+                  <p className="mt-3 font-mono text-[10px] text-paper-40">
+                    {MAX_DOWNLOAD_FILES} files maximum — remove one before
+                    adding another.
+                  </p>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => {
+                      setFileNote(null);
+                      setReplaceIndex(null);
+                      fileInputRef.current?.click();
+                    }}
                     disabled={uploadingFile}
-                    className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed px-4 py-6 text-center transition-colors disabled:opacity-60"
+                    className="mt-3 flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-card border border-dashed px-4 py-6 text-center transition-colors disabled:opacity-60"
                   >
                     <Upload size={16} aria-hidden className="text-kraft-60" />
                     <span className="font-mono text-[11px] text-paper-70">
-                      {uploadingFile ? 'Uploading to Storage…' : 'Drop or click — upload the file'}
+                      {uploadingFile ? 'Uploading to Storage…' : 'Drop or click — add a file'}
                     </span>
                     <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
-                      pdf, zip, epub, png, jpg, webp, mp4, mp3 · max 100 MB
+                      pdf, zip, epub, png, jpg, webp, mp4, mp3 · max 100 MB each
                     </span>
                   </button>
                 )}
@@ -1156,17 +1256,6 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                   }}
                 />
 
-                {product.downloadPath && !uploadingFile && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-card border border-line px-3 text-xs text-paper-70 hover:border-paper-40 hover:text-paper"
-                  >
-                    <Upload size={14} aria-hidden />
-                    Replace file
-                  </button>
-                )}
-
                 {fileNote && (
                   <p
                     role={fileNoteIsError ? 'alert' : 'status'}
@@ -1181,10 +1270,10 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
 
                 {(product.productType ?? 'physical') === 'digital' &&
                   product.status === 'active' &&
-                  !product.downloadPath && (
+                  downloadFiles.length === 0 && (
                     <p className="mt-3 font-mono text-[11px] text-vermilion">
-                      A published digital product needs its file — upload one
-                      above, or save it as a draft.
+                      A published digital product needs at least one file — upload
+                      one above, or save it as a draft.
                     </p>
                   )}
               </div>

@@ -1,4 +1,11 @@
-import type { BlogPost, ModelKey, Product, ProductSpec } from '@/lib/types';
+import type {
+  BlogPost,
+  ModelKey,
+  Product,
+  ProductDownloadFile,
+  ProductSpec,
+} from '@/lib/types';
+import { MAX_DOWNLOAD_FILES } from '@/lib/types';
 import { configProblem, rest } from '@/lib/server/content-store';
 
 /**
@@ -66,6 +73,13 @@ interface ProductRow {
   updated_at: string;
 }
 
+interface ProductFileRow {
+  product_id: string;
+  position: number;
+  storage_path: string;
+  filename: string;
+}
+
 interface PostRow {
   id: string;
   position: number;
@@ -90,6 +104,9 @@ interface PostRow {
 
 const PRODUCT_COLUMNS =
   'id,position,slug,name,category,price,compare_at_price,description,badge,model,pack_count,size,detail,specs,status,stock,product_type,download_path,download_filename,variants,tags,images,seo,updated_at';
+// ^ download_path/download_filename are still SELECTED because they are
+//   still WRITTEN (projection of file #1, see saveProduct) — but the
+//   editor shape reads product_files, never these two columns.
 const POST_COLUMNS =
   'id,position,slug,title,title_lines,standfirst,excerpt,date,minutes,category,model,body,related_product_ids,placeholder,status,tags,cover_url,published_at,updated_at';
 
@@ -97,7 +114,13 @@ const POST_COLUMNS =
 /* Mapping: row → admin shape                                          */
 /* ------------------------------------------------------------------ */
 
-function toProduct(row: ProductRow): Product {
+/**
+ * Row → editor shape. `files` comes from product_files (the source of
+ * truth for what a digital listing ships, Tier 7) rather than from the
+ * products row: the two download_* columns are only the projection of
+ * file #1 that saveProduct keeps writing for older readers.
+ */
+function toProduct(row: ProductRow, files: ProductDownloadFile[]): Product {
   return {
     id: row.id,
     slug: row.slug,
@@ -115,8 +138,7 @@ function toProduct(row: ProductRow): Product {
     stock: row.stock ?? 0,
     status: row.status === 'inactive' ? 'inactive' : 'active',
     productType: row.product_type === 'digital' ? 'digital' : 'physical',
-    ...(row.download_path ? { downloadPath: row.download_path } : {}),
-    ...(row.download_filename ? { downloadFilename: row.download_filename } : {}),
+    ...(files.length > 0 ? { downloadFiles: files } : {}),
     variants: row.variants ?? [],
     tags: row.tags ?? [],
     images: row.images ?? [],
@@ -209,54 +231,70 @@ export function validateProduct(input: unknown): { error: string } | { product: 
   if (productType !== 'physical' && productType !== 'digital') {
     return { error: 'Product type must be physical or digital.' };
   }
-  const downloadPath =
-    typeof p.downloadPath === 'string' && p.downloadPath.trim() !== ''
-      ? p.downloadPath.trim()
-      : undefined;
-  const downloadFilename =
-    typeof p.downloadFilename === 'string' && p.downloadFilename.trim() !== ''
-      ? p.downloadFilename.trim()
-      : undefined;
-  if (downloadPath !== undefined) {
+  // Tier 7: a digital product carries a LIST of files (max 10) instead
+  // of one path. The cap is held server-side exactly like a content
+  // list's maxItems is held in the publish route — the editor stops
+  // offering "Add" at the cap, and a hand-built payload cannot exceed it.
+  const rawFiles =
+    p.downloadFiles === undefined || p.downloadFiles === null ? [] : p.downloadFiles;
+  if (!Array.isArray(rawFiles)) {
+    return { error: 'Download files must be a list of { path, filename }.' };
+  }
+  if (rawFiles.length > MAX_DOWNLOAD_FILES) {
+    return {
+      error: `A digital product takes at most ${MAX_DOWNLOAD_FILES} files — ${rawFiles.length} were sent.`,
+    };
+  }
+  const downloadFiles: ProductDownloadFile[] = [];
+  const seenPaths = new Set<string>();
+  for (const file of rawFiles as unknown[]) {
+    if (!isRecord(file)) {
+      return { error: 'Every download file needs a path and a filename.' };
+    }
+    const filePath = typeof file.path === 'string' ? file.path.trim() : '';
+    const fileFilename = typeof file.filename === 'string' ? file.filename.trim() : '';
+    if (!filePath || !fileFilename) {
+      return { error: 'Every download file needs a path and a filename.' };
+    }
     // Same shape rule the storage layer enforces: a bucket-relative
     // path, no leading slash, no traversal. A malformed path here would
     // be minted into a signed URL later and fail at download time, so
     // it is rejected at save time instead.
     if (
-      downloadPath.length > 300 ||
-      downloadPath.startsWith('/') ||
-      downloadPath.includes('..') ||
-      downloadPath.includes('\\') ||
-      downloadPath.includes('\0') ||
-      downloadPath.split('/').some((segment) => segment === '')
+      filePath.length > 300 ||
+      filePath.startsWith('/') ||
+      filePath.includes('..') ||
+      filePath.includes('\\') ||
+      filePath.includes('\0') ||
+      filePath.split('/').some((segment) => segment === '')
     ) {
-      return { error: 'The download file path is not a valid storage path.' };
+      return { error: `“${fileFilename}” does not point at a valid storage path.` };
     }
+    if (fileFilename.length > 200) {
+      return { error: 'A download filename is too long (200 max).' };
+    }
+    // One row per path is also a UNIQUE constraint in the database —
+    // caught here so the editor gets a sentence instead of a 409.
+    if (seenPaths.has(filePath)) {
+      return { error: `“${fileFilename}” is attached twice — remove one copy.` };
+    }
+    seenPaths.add(filePath);
+    downloadFiles.push({ path: filePath, filename: fileFilename });
   }
-  if (downloadFilename !== undefined && downloadFilename.length > 200) {
-    return { error: 'The download filename is too long (200 max).' };
-  }
-  if (downloadPath === undefined && downloadFilename !== undefined) {
-    return { error: 'A download filename needs the file it belongs to.' };
-  }
-  // Mirror of the photo rule: an ACTIVE digital product with no file
+  // Mirror of the photo rule: an ACTIVE digital product with no files
   // would sell nothing — checkout would confirm, the grant insert would
-  // find no path, and the buyer would get an email with no links.
+  // find no rows, and the buyer would get an email with no links.
   // Drafts are exempt so work-in-progress can be saved.
-  if (
-    productType === 'digital' &&
-    p.status === 'active' &&
-    downloadPath === undefined
-  ) {
+  if (productType === 'digital' && p.status === 'active' && downloadFiles.length === 0) {
     return {
       error:
-        'Publishing a digital product needs its file — upload one below (Save draft works without it).',
+        'Publishing a digital product needs at least one file — upload one below (Save draft works without it).',
     };
   }
-  if (productType === 'physical' && downloadPath !== undefined) {
+  if (productType === 'physical' && downloadFiles.length > 0) {
     return {
       error:
-        'Only a digital product can carry a download file — switch the type or clear the file.',
+        'Only a digital product can carry download files — switch the type or clear the files.',
     };
   }
   if (!isStrArray(p.detail, 40, 2000)) return { error: 'Detail must be up to 40 paragraphs.' };
@@ -315,8 +353,7 @@ export function validateProduct(input: unknown): { error: string } | { product: 
     stock: p.stock as number,
     status: p.status as Product['status'],
     productType: productType as Product['productType'],
-    ...(downloadPath ? { downloadPath } : {}),
-    ...(downloadFilename ? { downloadFilename } : {}),
+    ...(downloadFiles.length > 0 ? { downloadFiles } : {}),
     variants: p.variants as Product['variants'],
     tags: p.tags as string[],
     images: p.images as string[],
@@ -415,7 +452,20 @@ export function bodyFromMarkdown(content: string): string[] {
 
 export async function loadProducts(): Promise<Product[]> {
   const rows = await rest<ProductRow[]>(`products?select=${PRODUCT_COLUMNS}&order=position.asc`);
-  return rows.map(toProduct);
+  // Read on purpose with NO catch: if the file list could not be read,
+  // returning products with an empty file list would show the editor a
+  // catalogue with no files — and a Save from that state would delete
+  // every product_files row. Failing the GET loudly is the safe answer.
+  const fileRows = await rest<ProductFileRow[]>(
+    'product_files?select=product_id,position,storage_path,filename&order=position.asc',
+  );
+  const byProduct = new Map<string, ProductDownloadFile[]>();
+  for (const file of fileRows) {
+    const list = byProduct.get(file.product_id) ?? [];
+    list.push({ path: file.storage_path, filename: file.filename });
+    byProduct.set(file.product_id, list);
+  }
+  return rows.map((row) => toProduct(row, byProduct.get(row.id) ?? []));
 }
 
 export async function loadPosts(): Promise<BlogPost[]> {
@@ -448,6 +498,10 @@ export class SlugConflictError extends Error {}
 
 export async function saveProduct(product: Product): Promise<void> {
   const position = await resolvePosition('products', product.id);
+  // Tier 7: the file LIST is the source of truth (product_files); a
+  // physical product never carries one regardless of what was passed in.
+  const files: ProductDownloadFile[] =
+    product.productType === 'digital' ? (product.downloadFiles ?? []) : [];
   const row = {
     id: product.id,
     position,
@@ -469,13 +523,14 @@ export async function saveProduct(product: Product): Promise<void> {
       .filter((s) => s.label !== '' || s.value !== ''),
     status: product.status,
     stock: product.stock,
-    // Written explicitly (not conditionally) so switching a product
-    // from digital back to physical CLEARS the file instead of leaving
-    // an orphan path that no longer means anything.
+    // The two single-file columns are kept as a WRITE-ONLY projection of
+    // file #1: older readers (and any hand-run SQL) keep seeing something
+    // true, while product_files holds the real list. Written explicitly
+    // (not conditionally) so switching back to physical CLEARS them
+    // instead of leaving an orphan path that no longer means anything.
     product_type: product.productType === 'digital' ? 'digital' : 'physical',
-    download_path: product.productType === 'digital' ? (product.downloadPath ?? null) : null,
-    download_filename:
-      product.productType === 'digital' ? (product.downloadFilename ?? null) : null,
+    download_path: files[0]?.path ?? null,
+    download_filename: files[0]?.filename ?? null,
     variants: product.variants,
     tags: product.tags,
     images: product.images,
@@ -494,6 +549,70 @@ export async function saveProduct(product: Product): Promise<void> {
       throw new SlugConflictError(`Another product already uses the slug “${product.slug}”.`);
     }
     throw error;
+  }
+
+  await syncProductFiles(product.id, files);
+}
+
+/**
+ * Write the product's file list into product_files (Tier 7).
+ *
+ * ORDER MATTERS: the surviving rows are updated and the new rows added
+ * BEFORE anything is deleted. confirm_paid_order reads this table inside
+ * the confirmation transaction, so a save that deleted first could hand
+ * a concurrent buyer an empty grant set; with this order a reader sees
+ * either the old list or the new one, never a hole. A path that stays
+ * keeps its row (and its id); a path that goes is deleted, and the
+ * OBJECT ITSELF is deliberately left in the bucket — old orders' grants
+ * snapshot that path and must keep resolving.
+ *
+ * Every read here throws on failure rather than degrading to an empty
+ * list: a silently-empty read would look like "all files removed" to the
+ * next save, which is exactly how a list would get wiped by accident.
+ */
+async function syncProductFiles(
+  productId: string,
+  files: ProductDownloadFile[],
+): Promise<void> {
+  const existing = await rest<{ id: string; storage_path: string; filename: string; position: number }[]>(
+    `product_files?select=id,storage_path,filename,position` +
+      `&product_id=eq.${encodeURIComponent(productId)}`,
+  );
+  const byPath = new Map(existing.map((line) => [line.storage_path, line]));
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index]!;
+    const kept = byPath.get(file.path);
+    if (kept) {
+      if (kept.position !== index || kept.filename !== file.filename) {
+        await rest(`product_files?id=eq.${encodeURIComponent(kept.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ position: index, filename: file.filename }),
+        });
+      }
+      continue;
+    }
+    await rest('product_files', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        product_id: productId,
+        position: index,
+        storage_path: file.path,
+        filename: file.filename,
+      }),
+    });
+  }
+
+  const keep = new Set(files.map((file) => file.path));
+  const stale = existing.filter((line) => !keep.has(line.storage_path));
+  if (stale.length > 0) {
+    await rest(
+      `product_files?id=in.(${stale.map((line) => encodeURIComponent(line.id)).join(',')})`,
+      { method: 'DELETE', headers: { Prefer: 'return=minimal' } },
+    );
   }
 }
 
