@@ -13,6 +13,7 @@ import { MEDIA_RULES } from '@/data/mock/media';
 import type { Category, MediaItem, Product, ProductVariant, VariantType } from '@/lib/types';
 import { MAX_DOWNLOAD_FILES } from '@/lib/types';
 import { saveProduct } from '@/lib/catalog-api';
+import { uploadFileToStorage } from '@/lib/digital-file-upload';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -277,53 +278,12 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
     setFileNoteIsError(false);
     setUploadingFile(true);
     try {
-      const signRes = await fetch('/admin/api/digital-files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sign',
-          productId: product.id,
-          filename: file.name,
-          sizeBytes: file.size,
-        }),
-      });
-      const sign = (await signRes.json().catch(() => null)) as {
-        path?: string;
-        uploadUrl?: string;
-        contentType?: string;
-        error?: string;
-      } | null;
-      if (!signRes.ok || !sign?.uploadUrl || !sign.path) {
-        throw new Error(sign?.error ?? 'Could not prepare the upload.');
-      }
-
-      // The file goes straight to Storage — no Vercel body limit.
-      const put = await fetch(sign.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': sign.contentType ?? file.type },
-        body: file,
-      });
-      if (!put.ok) {
-        throw new Error(`Storage rejected the file (HTTP ${put.status}).`);
-      }
-
-      // The server checks what actually landed (size + mime) and deletes
-      // anything it will not accept.
-      const confirmRes = await fetch('/admin/api/digital-files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm', path: sign.path }),
-      });
-      const confirmed = (await confirmRes.json().catch(() => null)) as {
-        path?: string;
-        error?: string;
-      } | null;
-      if (!confirmRes.ok || !confirmed?.path) {
-        throw new Error(confirmed?.error ?? 'The file could not be verified.');
-      }
+      // The sign → PUT → confirm round trips live in
+      // lib/digital-file-upload so the course editor runs the identical
+      // flow — one implementation, not two copies.
+      const entry = await uploadFileToStorage(product.id, file);
 
       const next = [...files];
-      const entry = { path: confirmed.path, filename: file.name };
       if (target !== null && target >= 0 && target < next.length) {
         next[target] = entry;
       } else {
@@ -1239,7 +1199,7 @@ export function ProductEditor({ initial, mode }: ProductEditorProps) {
                       {uploadingFile ? 'Uploading to Storage…' : 'Drop or click — add a file'}
                     </span>
                     <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-paper-40">
-                      pdf, zip, epub, png, jpg, webp, mp4, mp3 · max 100 MB each
+                      pdf, zip, epub, png, jpg, webp, mp4, mp3 · max 50 MB each
                     </span>
                   </button>
                 )}

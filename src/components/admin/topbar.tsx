@@ -8,6 +8,8 @@ import { navItems } from './nav';
 const detailTitles = (pathname: string): string | null => {
   const product = pathname.match(/^\/admin\/products\/([^/]+)$/);
   if (product) return product[1] === 'new' ? 'New product' : 'Edit product';
+  const course = pathname.match(/^\/admin\/courses\/([^/]+)$/);
+  if (course) return course[1] === 'new' ? 'New course' : 'Edit course';
   const order = pathname.match(/^\/admin\/orders\/([^/]+)$/);
   if (order) return `Order #${order[1]}`;
   const post = pathname.match(/^\/admin\/blog\/([^/]+)$/);
