@@ -1,5 +1,6 @@
 import type {
   BlogPost,
+  EventPost,
   ModelKey,
   Product,
   ProductDownloadFile,
@@ -656,7 +657,10 @@ export async function savePost(post: BlogPost): Promise<void> {
 }
 
 /** Returns false when no row matched — the route answers 404. */
-export async function deleteRow(table: 'products' | 'blog_posts', id: string): Promise<boolean> {
+export async function deleteRow(
+  table: 'products' | 'blog_posts' | 'event_posts',
+  id: string,
+): Promise<boolean> {
   const deleted = await rest<unknown[]>(
     `${table}?id=eq.${encodeURIComponent(id)}`,
     {
@@ -665,6 +669,145 @@ export async function deleteRow(table: 'products' | 'blog_posts', id: string): P
     },
   );
   return Array.isArray(deleted) && deleted.length > 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Event posts — the public Events announcement feed.                  */
+/* A SEPARATE SYSTEM from Tier 6 (events/event_registrations/          */
+/* event_waitlist): no FK to `events`, no seat/payment columns —      */
+/* registration happens only on the /workshops pages a post links to. */
+/* ------------------------------------------------------------------ */
+
+const EVENT_POST_COLUMNS =
+  'id,title,description,event_date,image_url,link_url,link_label,status,created_at,updated_at';
+
+interface EventPostRow {
+  id: string;
+  title: string;
+  description: string;
+  event_date: string;
+  image_url: string | null;
+  link_url: string | null;
+  link_label: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function toEventPost(row: EventPostRow): EventPost {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    eventDate: row.event_date,
+    imageUrl: row.image_url,
+    linkUrl: row.link_url,
+    linkLabel: row.link_label,
+    status: row.status === 'published' ? 'published' : 'draft',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Shape validation — the server's own gate, mirroring validatePost.
+ * Publishing is stricter than Blog on purpose (same rule both editor
+ * layers state): a published post needs an image, because an
+ * announcement card without one reads as broken on /events. Drafts
+ * stay exempt so an announcement can be written up before its photo
+ * lands. The outbound link is optional and, when present, must be a
+ * site-absolute path (`/workshops/…`) — never an absolute URL, so a
+ * post can never become an open redirect or a payment handoff.
+ */
+export function validateEventPost(input: unknown): { error: string } | { post: EventPost } {
+  if (!isRecord(input)) return { error: 'Expected an event post object.' };
+  const p = input as Record<string, unknown>;
+
+  if (!isStr(p.id, 80) || !p.id) return { error: 'The event post needs an id.' };
+  if (!isStr(p.title, 200) || !p.title.trim()) return { error: 'The event post needs a title.' };
+  if (!isStr(p.description, 4000)) {
+    return { error: 'The description is too long (4,000 characters max).' };
+  }
+  if (typeof p.eventDate !== 'string' || !Number.isFinite(Date.parse(p.eventDate))) {
+    return { error: 'The event post needs a valid date.' };
+  }
+  if (p.status !== 'draft' && p.status !== 'published') {
+    return { error: 'Status must be draft or published.' };
+  }
+  if (
+    p.imageUrl !== undefined &&
+    p.imageUrl !== null &&
+    (!isStr(p.imageUrl, 500) || !/^https?:\/\//.test(p.imageUrl))
+  ) {
+    return { error: 'The image must be a hosted URL from the media library.' };
+  }
+  if (p.status === 'published' && !(p.imageUrl as string | null)?.trim()) {
+    return { error: 'Publishing needs an image — pick one from the media library, or save a draft.' };
+  }
+  if (p.linkUrl !== undefined && p.linkUrl !== null) {
+    if (!isStr(p.linkUrl, 300) || !p.linkUrl.startsWith('/') || p.linkUrl.startsWith('//')) {
+      return {
+        error:
+          'The link must be a path on this site (e.g. /workshops/some-slug) — remove the domain.',
+      };
+    }
+  }
+  if (p.linkLabel !== undefined && !isStr(p.linkLabel, 40)) {
+    return { error: 'The button wording is too long (40 characters max).' };
+  }
+  if (p.linkUrl && !(typeof p.linkLabel === 'string' && p.linkLabel.trim())) {
+    return { error: 'A link needs button wording — “Register” or “Learn more”.' };
+  }
+
+  const post: EventPost = {
+    id: p.id as string,
+    title: (p.title as string).trim(),
+    description: (p.description as string) ?? '',
+    eventDate: p.eventDate as string,
+    imageUrl: ((p.imageUrl as string | null) ?? '').trim() || null,
+    linkUrl: ((p.linkUrl as string | null) ?? '').trim() || null,
+    linkLabel:
+      (typeof p.linkLabel === 'string' && p.linkLabel.trim()) || 'Learn more',
+    status: p.status,
+    createdAt:
+      typeof p.createdAt === 'string' ? p.createdAt : new Date().toISOString(),
+    updatedAt: typeof p.updatedAt === 'string' ? p.updatedAt : new Date().toISOString(),
+  };
+  return { post };
+}
+
+export async function loadEventPosts(): Promise<EventPost[]> {
+  // Event_date desc: the feed's natural read is soonest-upcoming first
+  // on /events, and the page splits on now() anyway — newest announcements
+  // are what the admin scans the list for.
+  const rows = await rest<EventPostRow[]>(
+    `event_posts?select=${EVENT_POST_COLUMNS}&order=event_date.desc`,
+  );
+  return rows.map(toEventPost);
+}
+
+/** One-row upsert — event_posts has no position column (the feed is
+ *  ordered by date, not shelf order) and no slug (no detail pages). */
+export async function saveEventPost(post: EventPost): Promise<void> {
+  const now = new Date().toISOString();
+  const row = {
+    id: post.id,
+    title: post.title,
+    description: post.description,
+    event_date: post.eventDate,
+    image_url: post.imageUrl,
+    link_url: post.linkUrl,
+    link_label: post.linkLabel,
+    status: post.status,
+    created_at: post.createdAt,
+    updated_at: now,
+  };
+
+  await rest('event_posts?on_conflict=id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(row),
+  });
 }
 
 /** Re-exported so routes can share one config answer with content routes. */

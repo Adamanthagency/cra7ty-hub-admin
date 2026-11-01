@@ -185,6 +185,34 @@ export interface BlogPost {
   updatedAt: string; // ISO datetime
 }
 
+/* ================================================================== 
+   EVENT POSTS — the public Events announcement feed.
+   A SEPARATE SYSTEM from Tier 6: editorial announcements with an
+   optional outbound link to a /workshops/<slug> page. No registrants,
+   no payment, no capacity — those live only on the Tier 6 pages a
+   post's link points at.
+   ================================================================== */
+
+/** Draft/published only — no cancelled: an announcement is either up or not. */
+export type EventPostStatus = 'draft' | 'published';
+
+export interface EventPost {
+  id: string;
+  title: string;
+  description: string;
+  /** ISO datetime — the announced date; drives upcoming/past on /events. */
+  eventDate: string;
+  /** Optional image from the media library; required to publish. */
+  imageUrl: string | null;
+  /** Optional outbound link, e.g. /workshops/<slug> — never a payment path. */
+  linkUrl: string | null;
+  /** Button wording when linkUrl is set ('Register' or 'Learn more'). */
+  linkLabel: string;
+  status: EventPostStatus;
+  createdAt: string; // ISO datetime
+  updatedAt: string; // ISO datetime
+}
+
 export type DiscountType = 'percentage' | 'flat';
 
 export interface PromoCode {

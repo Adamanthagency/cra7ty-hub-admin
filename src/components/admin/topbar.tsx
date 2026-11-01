@@ -10,6 +10,9 @@ const detailTitles = (pathname: string): string | null => {
   if (product) return product[1] === 'new' ? 'New product' : 'Edit product';
   const course = pathname.match(/^\/admin\/courses\/([^/]+)$/);
   if (course) return course[1] === 'new' ? 'New course' : 'Edit course';
+  const eventPost = pathname.match(/^\/admin\/event-posts\/([^/]+)$/);
+  if (eventPost)
+    return eventPost[1] === 'new' ? 'New event post' : 'Edit event post';
   const order = pathname.match(/^\/admin\/orders\/([^/]+)$/);
   if (order) return `Order #${order[1]}`;
   const post = pathname.match(/^\/admin\/blog\/([^/]+)$/);
