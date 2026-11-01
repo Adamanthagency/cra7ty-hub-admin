@@ -34,8 +34,17 @@ export const dynamic = 'force-dynamic';
 
 const BUCKET = 'digital-files';
 
-/** Server-side ceiling — the bucket cannot hold one, so we enforce it. */
-const MAX_BYTES = 100 * 1024 * 1024;
+/**
+ * Server-side ceiling. This is the PROJECT's real storage cap, not a
+ * preference: the Supabase Free tier rejects any single object over
+ * 50 MiB (52,428,800 bytes) with 413 EntityTooLarge, whatever the
+ * upload method. Measured empirically against this project — 50 MiB
+ * accepted, 50 MiB + 1 rejected — so a higher number here would let
+ * the sign step pass a file the bucket will then refuse mid-upload.
+ * The bucket cannot hold a file_size_limit of its own on this build,
+ * so we enforce the platform ceiling here, before the bytes travel.
+ */
+const MAX_BYTES = 50 * 1024 * 1024;
 
 /** Must match the bucket's allowed_mime_types (see create-digital-bucket). */
 const ALLOWED_MIME = new Map<string, string[]>([
