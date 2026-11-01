@@ -93,13 +93,13 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
     setNote(null);
     if (!name.trim()) {
       setNoteIsError(true);
-      setNote('The event needs a name.');
+      setNote('The workshop/exhibition needs a name.');
       return;
     }
     const finalSlug = slugTouched && slug.trim() ? slug.trim().toLowerCase() : slugify(name);
     if (!finalSlug) {
       setNoteIsError(true);
-      setNote('The event needs a slug — lowercase letters, numbers and dashes.');
+      setNote('The workshop/exhibition needs a slug — lowercase letters, numbers and dashes.');
       return;
     }
 
@@ -117,7 +117,7 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
     }
     if (!startsAt) {
       setNoteIsError(true);
-      setNote('The event needs a date and time.');
+      setNote('The workshop/exhibition needs a date and time.');
       return;
     }
 
@@ -145,7 +145,7 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
         result.revalidate && !result.revalidate.ok
           ? 'Saved — but the storefront refresh failed, so the public page may take up to five minutes to catch up.'
           : nextStatus === 'published'
-            ? 'Published. The event page is live.'
+            ?              'Published. The workshop/exhibition page is live.'
             : 'Saved.',
       );
       if (result.capacityNote) {
@@ -167,7 +167,7 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
     <div className="space-y-6">
       <section className="card-admin space-y-4 p-5">
         <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-paper-40">
-          The event
+          The workshop/exhibition
         </h2>
         <Field label="Name">
           <input
@@ -259,7 +259,7 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Price (₦)"
-            hint={price.trim() !== '' && Number(price) === 0 ? 'Free event — no payment, confirmed on the spot.' : 'Whole naira.'}
+            hint={price.trim() !== '' && Number(price) === 0 ? 'Free workshop/exhibition — no payment, confirmed on the spot.' : 'Whole naira.'}
           >
             <input
               className={inputCls}
@@ -335,7 +335,7 @@ export function EventEditor({ initial }: { initial?: EventRow }) {
             disabled={busy}
             className="rounded-card border border-vermilion/40 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-vermilion hover:border-vermilion"
           >
-            Cancel event
+            Cancel workshop/exhibition
           </button>
         )}
         {editing && status === 'cancelled' && (

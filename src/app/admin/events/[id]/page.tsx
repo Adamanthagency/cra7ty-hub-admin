@@ -107,7 +107,7 @@ export default function AdminEventDetailPage() {
   if (failed) {
     return (
       <div>
-        <PageHeader title="Event" />
+        <PageHeader title="Workshop/Exhibition" />
         <p role="alert" className="font-mono text-[11px] text-vermilion">
           {failed}
         </p>
@@ -118,7 +118,7 @@ export default function AdminEventDetailPage() {
   if (!event) {
     return (
       <div>
-        <PageHeader title="Event" />
+        <PageHeader title="Workshop/Exhibition" />
         <p className="font-mono text-[11px] text-paper-40">Loading…</p>
       </div>
     );
@@ -136,7 +136,7 @@ export default function AdminEventDetailPage() {
               href="/admin/events"
               className="font-mono text-[11px] text-paper-60 underline-offset-4 hover:text-paper hover:underline"
             >
-              ← All events
+              ← All workshops/exhibitions
             </Link>
           </div>
         }

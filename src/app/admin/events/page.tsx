@@ -83,14 +83,14 @@ export default function AdminEventsPage() {
   return (
     <div>
       <PageHeader
-        title="Events"
+        title="Workshops/Exhibitions"
         subtitle={`${rows.length} total`}
         right={
           <Link
             href="/admin/events/new"
             className="rounded-card border border-kraft-30 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-paper hover:border-kraft-60"
           >
-            + New event
+            + New workshop/exhibition
           </Link>
         }
       />
@@ -123,7 +123,7 @@ export default function AdminEventsPage() {
 
       {failed && (
         <p role="alert" className="mb-4 font-mono text-[11px] text-vermilion">
-          Could not load events — {failed}
+          Could not load workshops/exhibitions — {failed}
         </p>
       )}
       {loading && !failed && (
@@ -133,7 +133,7 @@ export default function AdminEventsPage() {
       {!loading && !failed && filtered.length === 0 && (
         <div className="card-admin p-8 text-center">
           <p className="font-display text-lg text-paper">
-            {rows.length === 0 ? 'No events yet.' : `Nothing in “${TABS.find((t) => t.key === tab)?.label}”.`}
+            {rows.length === 0 ? 'No workshops/exhibitions yet.' : `Nothing in “${TABS.find((t) => t.key === tab)?.label}”.`}
           </p>
           <p className="mt-2 font-mono text-[11px] text-paper-50">
             {rows.length === 0
@@ -145,7 +145,7 @@ export default function AdminEventsPage() {
               href="/admin/events/new"
               className="mt-4 inline-block rounded-card border border-kraft-30 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-paper hover:border-kraft-60"
             >
-              Create the first event
+              Create the first workshop/exhibition
             </Link>
           )}
         </div>
@@ -156,7 +156,7 @@ export default function AdminEventsPage() {
           <table className="w-full min-w-[46rem] border-collapse">
             <thead>
               <tr className="border-b border-line text-left">
-                {['Event', 'When', 'Kind', 'Entry', 'Seats', 'Status', ''].map((h) => (
+                {['Workshop/Exhibition', 'When', 'Kind', 'Entry', 'Seats', 'Status', ''].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-paper-40"

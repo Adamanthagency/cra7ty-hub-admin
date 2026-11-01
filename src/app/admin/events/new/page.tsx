@@ -9,13 +9,13 @@ export default function NewEventPage() {
   return (
     <div>
       <PageHeader
-        title="New event"
+        title="New workshop/exhibition"
         right={
           <Link
             href="/admin/events"
             className="font-mono text-[11px] text-paper-60 underline-offset-4 hover:text-paper hover:underline"
           >
-            ← All events
+            ← All workshops/exhibitions
           </Link>
         }
       />
