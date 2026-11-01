@@ -14,6 +14,12 @@ import { fetchProducts } from '@/lib/catalog-api';
 import type { Order, Product } from '@/lib/types';
 import { formatNgn, formatShortDate } from '@/lib/format';
 
+/**
+ * Courses aren't stock-tracked (they carry stock 0) and are managed in
+ * /admin/courses — without this they would flood the low-stock alert.
+ */
+const COURSES_CATEGORY = 'courses';
+
 const quickActions = [
   { label: 'Add product', href: '/admin/products/new', icon: Plus },
   { label: 'Write post', href: '/admin/blog/new', icon: PenLine },
@@ -67,7 +73,9 @@ export default function DashboardPage() {
 
   const pendingCount = orders.filter((o) => o.status === 'pending').length;
   const reviewCount = orders.filter((o) => o.needsReview).length;
-  const lowStock = products.filter((p) => p.stock < 5);
+  const lowStock = products.filter(
+    (p) => p.stock < 5 && p.category !== COURSES_CATEGORY,
+  );
   const recent = [...orders]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 5);

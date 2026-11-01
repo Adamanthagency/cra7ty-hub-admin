@@ -14,6 +14,14 @@ import type { Category, Product } from '@/lib/types';
 import { formatNgn } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
+/**
+ * Courses are managed in their own section (/admin/courses) and are never
+ * listed here — the same rule the storefront applies to /shop. Rows enter
+ * state already filtered, so the count, search, bulk actions and the
+ * category filter can never surface one.
+ */
+const COURSES_CATEGORY = 'courses';
+
 function initials(name: string): string {
   return name
     .split(/[\s,]+/)
@@ -30,7 +38,10 @@ function ProductsContent() {
 
   // Instant paint from the seed, then hydrate from the live table — the
   // database is the source of truth, the seed is only the offline fallback.
-  const [rows, setRows] = useState<Product[]>(seed);
+  // Courses are dropped here, at the single point rows enter state.
+  const [rows, setRows] = useState<Product[]>(
+    seed.filter((p) => p.category !== COURSES_CATEGORY),
+  );
   // Filter options track the LIVE category set (incl. a saved draft) plus
   // every category the loaded rows actually carry — the old seed-derived
   // list silently missed categories added after launch.
@@ -38,7 +49,9 @@ function ProductsContent() {
   const categoryOptions = useMemo(() => {
     const pending = drafts.find((d) => d.type === 'category');
     const catRows = (pending ? (pending.after as Category[]) : categories) ?? [];
-    const options = new Set(catRows.map((r) => r.id).filter(Boolean));
+    const options = new Set(
+      catRows.map((r) => r.id).filter((id) => id && id !== COURSES_CATEGORY),
+    );
     for (const p of rows) if (p.category) options.add(p.category);
     return Array.from(options).sort();
   }, [categories, drafts, rows]);
@@ -57,7 +70,7 @@ function ProductsContent() {
     fetchProducts()
       .then((products) => {
         if (cancelled) return;
-        setRows(products);
+        setRows(products.filter((p) => p.category !== COURSES_CATEGORY));
         setLiveStatus('live');
       })
       .catch((error: Error) => {

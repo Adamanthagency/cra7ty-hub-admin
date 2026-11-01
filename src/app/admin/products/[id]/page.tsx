@@ -2,19 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { ProductEditor } from '@/components/admin/product-editor';
 import { fetchProducts } from '@/lib/catalog-api';
 import type { Product } from '@/lib/types';
 
+/** Courses are managed in their own section — see /admin/courses. */
+const COURSES_CATEGORY = 'courses';
+
 /**
  * Edit route for one product. Hydrated from the live table (mock seeds are
  * only the offline fallback), so a product created in the admin — or seeded
  * from the storefront — always opens here even when the seed never listed it.
+ * A course id arriving from a stale link (a bookmark, or the dashboard's
+ * low-stock list) is handed to its own editor instead of the product form.
  */
 export default function EditProductPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [product, setProduct] = useState<Product | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,7 +30,12 @@ export default function EditProductPage() {
     fetchProducts()
       .then((rows) => {
         if (cancelled) return;
-        setProduct(rows.find((p) => p.id === params.id) ?? null);
+        const found = rows.find((p) => p.id === params.id) ?? null;
+        if (found?.category === COURSES_CATEGORY) {
+          router.replace(`/admin/courses/${params.id}`);
+          return;
+        }
+        setProduct(found);
         setLoading(false);
       })
       .catch((e: Error) => {
@@ -35,7 +46,7 @@ export default function EditProductPage() {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [params.id, router]);
 
   if (loading) {
     return <p className="font-mono text-[11px] text-paper-40">Loading live product…</p>;
